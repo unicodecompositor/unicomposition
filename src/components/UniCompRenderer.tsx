@@ -1,7 +1,9 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { UniCompSpec, SymbolSpec, getRect, stringifySpec, resolveHistory, appendTransformToHistory, undoLastHistoryParam, DeltaColor } from '@/lib/unicomp-parser';
 
-/** During drag: clone original history and append a temp step with the gesture's absolute value */
+/** During drag: clone original history and append a temp step with the gesture's absolute value.
+ *  After appending, re-resolve ALL accumulated params from history so that no existing
+ *  params (r=, st=, sp=, color, etc.) are lost when a different tool writes to history. */
 function appendTempHistoryStep(
   sym: SymbolSpec,
   origSym: SymbolSpec | undefined,
@@ -11,6 +13,29 @@ function appendTempHistoryStep(
   const origHistory = origSym?.history ? JSON.parse(JSON.stringify(origSym.history)) : [];
   sym.history = origHistory;
   appendTransformToHistory(sym, paramType, newValue);
+  // Re-resolve ALL accumulated params from full history to prevent any from being lost
+  reResolveAllFromHistory(sym);
+}
+
+/** Re-apply all accumulated history values onto the symbol's live properties.
+ *  This ensures that applying one transform (e.g. sp) doesn't wipe another (e.g. r, st, color). */
+function reResolveAllFromHistory(sym: SymbolSpec) {
+  if (!sym.history || sym.history.length === 0) return;
+  const resolved = resolveHistory(sym.history);
+  if (resolved.st) sym.st = resolved.st;
+  if (resolved.sp) sym.sp = resolved.sp;
+  if (resolved.rotate !== undefined) sym.rotate = resolved.rotate;
+  if (resolved.scale) sym.scale = resolved.scale;
+  if (resolved.offset) sym.offset = resolved.offset;
+  if (resolved.d) sym.bounds = { w: resolved.d.x, h: resolved.d.y };
+  if (resolved.colorGroup) {
+    if (resolved.colorGroup.color !== undefined) sym.color = resolved.colorGroup.color;
+    if (resolved.colorGroup.background !== undefined) sym.background = resolved.colorGroup.background;
+    if (resolved.colorGroup.strokeColor !== undefined) sym.strokeColor = resolved.colorGroup.strokeColor;
+    if (resolved.colorGroup.strokeWidth !== undefined) sym.strokeWidth = resolved.colorGroup.strokeWidth;
+    if (resolved.colorGroup.strokeOpacity !== undefined) sym.strokeOpacity = resolved.colorGroup.strokeOpacity;
+    if (resolved.colorGroup.opacity !== undefined) sym.opacity = resolved.colorGroup.opacity;
+  }
 }
 import { Move, RotateCw, Maximize2, Diamond, Hexagon, Undo2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -554,8 +579,14 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
           const sym = newSpec.symbols[idx];
           if (!sym) return;
           const origSym = initialSpec.symbols[idx];
-          sym.st = undefined;
-          if (result.force <= 0) { sym.sp = undefined; sym.history = origSym?.history ? JSON.parse(JSON.stringify(origSym.history)) : undefined; return; }
+          // Don't blindly clear st — let history preserve it
+          if (result.force <= 0) {
+            sym.sp = undefined;
+            sym.history = origSym?.history ? JSON.parse(JSON.stringify(origSym.history)) : undefined;
+            // Re-resolve to restore any st/r/color that existed in history
+            if (sym.history) reResolveAllFromHistory(sym);
+            return;
+          }
           sym.sp = { angle: result.angle, force: result.force };
           appendTempHistoryStep(sym, origSym, 'sp', { angle: result.angle, force: result.force });
         });
@@ -579,8 +610,14 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
           const sym = newSpec.symbols[idx];
           if (!sym) return;
           const origSym = initialSpec.symbols[idx];
-          sym.sp = undefined;
-          if (result.force <= 0) { sym.st = undefined; sym.history = origSym?.history ? JSON.parse(JSON.stringify(origSym.history)) : undefined; return; }
+          // Don't blindly clear sp — let history preserve it
+          if (result.force <= 0) {
+            sym.st = undefined;
+            sym.history = origSym?.history ? JSON.parse(JSON.stringify(origSym.history)) : undefined;
+            // Re-resolve to restore any sp/r/color that existed in history
+            if (sym.history) reResolveAllFromHistory(sym);
+            return;
+          }
           sym.st = { angle: result.angle, force: result.force };
           appendTempHistoryStep(sym, origSym, 'st', { angle: result.angle, force: result.force });
         });
@@ -876,18 +913,18 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
         <>
           {/* Color undo + palette grouped */}
           <div
-            className="absolute z-30 flex items-center gap-1 pointer-events-auto"
+            className="absolute z-30 flex items-center gap-2 pointer-events-auto"
             style={{
               left: selectionBounds.x + selectionBounds.width / 2,
               top: selectionBounds.y - 42,
               transform: 'translateX(-50%)',
             }}
           >
-            {/* Color undo button - to the left of palette */}
+            {/* Color undo button - shifted left with margin so it doesn't overlap palette */}
             {selectionHasParam('colorGroup') && (
               <button
                 type="button"
-                className="selection-handle selection-undo-btn relative"
+                className="selection-handle selection-undo-btn relative mr-1"
                 onClick={(e) => handleUndoTransform('colorGroup', e)}
                 title="Undo color changes"
               >
