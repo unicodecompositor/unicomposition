@@ -1,7 +1,9 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { UniCompSpec, SymbolSpec, getRect, stringifySpec, resolveHistory, appendTransformToHistory, undoLastHistoryParam, DeltaColor } from '@/lib/unicomp-parser';
 
-/** During drag: clone original history and append a temp step with the gesture's absolute value */
+/** During drag: clone original history and append a temp step with the gesture's absolute value.
+ *  After appending, re-resolve ALL accumulated params from history so that no existing
+ *  params (r=, st=, sp=, color, etc.) are lost when a different tool writes to history. */
 function appendTempHistoryStep(
   sym: SymbolSpec,
   origSym: SymbolSpec | undefined,
@@ -11,6 +13,29 @@ function appendTempHistoryStep(
   const origHistory = origSym?.history ? JSON.parse(JSON.stringify(origSym.history)) : [];
   sym.history = origHistory;
   appendTransformToHistory(sym, paramType, newValue);
+  // Re-resolve ALL accumulated params from full history to prevent any from being lost
+  reResolveAllFromHistory(sym);
+}
+
+/** Re-apply all accumulated history values onto the symbol's live properties.
+ *  This ensures that applying one transform (e.g. sp) doesn't wipe another (e.g. r, st, color). */
+function reResolveAllFromHistory(sym: SymbolSpec) {
+  if (!sym.history || sym.history.length === 0) return;
+  const resolved = resolveHistory(sym.history);
+  if (resolved.st) sym.st = resolved.st;
+  if (resolved.sp) sym.sp = resolved.sp;
+  if (resolved.rotate !== undefined) sym.rotate = resolved.rotate;
+  if (resolved.scale) sym.scale = resolved.scale;
+  if (resolved.offset) sym.offset = resolved.offset;
+  if (resolved.d) sym.bounds = { w: resolved.d.x, h: resolved.d.y };
+  if (resolved.colorGroup) {
+    if (resolved.colorGroup.color !== undefined) sym.color = resolved.colorGroup.color;
+    if (resolved.colorGroup.background !== undefined) sym.background = resolved.colorGroup.background;
+    if (resolved.colorGroup.strokeColor !== undefined) sym.strokeColor = resolved.colorGroup.strokeColor;
+    if (resolved.colorGroup.strokeWidth !== undefined) sym.strokeWidth = resolved.colorGroup.strokeWidth;
+    if (resolved.colorGroup.strokeOpacity !== undefined) sym.strokeOpacity = resolved.colorGroup.strokeOpacity;
+    if (resolved.colorGroup.opacity !== undefined) sym.opacity = resolved.colorGroup.opacity;
+  }
 }
 import { Move, RotateCw, Maximize2, Diamond, Hexagon, Undo2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
