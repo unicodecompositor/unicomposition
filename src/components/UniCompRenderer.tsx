@@ -610,8 +610,14 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
           const sym = newSpec.symbols[idx];
           if (!sym) return;
           const origSym = initialSpec.symbols[idx];
-          sym.sp = undefined;
-          if (result.force <= 0) { sym.st = undefined; sym.history = origSym?.history ? JSON.parse(JSON.stringify(origSym.history)) : undefined; return; }
+          // Don't blindly clear sp — let history preserve it
+          if (result.force <= 0) {
+            sym.st = undefined;
+            sym.history = origSym?.history ? JSON.parse(JSON.stringify(origSym.history)) : undefined;
+            // Re-resolve to restore any sp/r/color that existed in history
+            if (sym.history) reResolveAllFromHistory(sym);
+            return;
+          }
           sym.st = { angle: result.angle, force: result.force };
           appendTempHistoryStep(sym, origSym, 'st', { angle: result.angle, force: result.force });
         });
