@@ -912,19 +912,19 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
       {selectionBounds && (
         <>
           {/* Color undo + palette grouped */}
-          <div
-            className="absolute z-30 flex items-center gap-2 pointer-events-auto"
+           <div
+            className="absolute z-30 flex items-center gap-3 pointer-events-auto"
             style={{
               left: selectionBounds.x + selectionBounds.width / 2,
               top: selectionBounds.y - 42,
               transform: 'translateX(-50%)',
             }}
           >
-            {/* Color undo button - shifted left with margin so it doesn't overlap palette */}
+            {/* Color undo button - positioned clearly left of palette */}
             {selectionHasParam('colorGroup') && (
               <button
                 type="button"
-                className="selection-handle selection-undo-btn relative mr-1"
+                className="selection-handle selection-undo-btn relative mr-2"
                 onClick={(e) => handleUndoTransform('colorGroup', e)}
                 title="Undo color changes"
               >
