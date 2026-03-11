@@ -1033,82 +1033,72 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
             <ColorStrokePanel
               color={spec?.symbols[selectionSet[0]]?.color}
               opacity={spec?.symbols[selectionSet[0]]?.opacity}
-              background={spec?.symbols[selectionSet[0]]?.background}
-              backgroundOpacity={spec?.symbols[selectionSet[0]]?.backgroundOpacity}
-              borderRadius={spec?.symbols[selectionSet[0]]?.borderRadius}
               strokeWidth={spec?.symbols[selectionSet[0]]?.strokeWidth}
               strokeColor={spec?.symbols[selectionSet[0]]?.strokeColor}
               strokeOpacity={spec?.symbols[selectionSet[0]]?.strokeOpacity}
-              onColorChange={(color, opacity, isFinal) => {
+              background={spec?.symbols[selectionSet[0]]?.background}
+              backgroundOpacity={spec?.symbols[selectionSet[0]]?.backgroundOpacity ?? 1}
+              borderRadius={spec?.symbols[selectionSet[0]]?.borderRadius ?? ''}
+              layerBorderWidth={spec?.symbols[selectionSet[0]]?.layerBorderWidth}
+              layerBorderColor={spec?.symbols[selectionSet[0]]?.layerBorderColor}
+              layerBorderOpacity={spec?.symbols[selectionSet[0]]?.layerBorderOpacity}
+              onSymbolChange={(data, isFinal) => {
                 if (!spec || !onUpdateCode) return;
                 const newSpec = JSON.parse(JSON.stringify(spec));
                 selectionSet.forEach(idx => {
-                  if (newSpec.symbols[idx]) {
-                    newSpec.symbols[idx].color = color;
-                    newSpec.symbols[idx].opacity = opacity;
-                    if (isFinal) {
-                      appendTransformToHistory(newSpec.symbols[idx], 'colorGroup', {
-                        op: '=',
-                        color,
-                        opacity,
-                        background: newSpec.symbols[idx].background,
-                        backgroundOpacity: newSpec.symbols[idx].backgroundOpacity,
-                        borderRadius: newSpec.symbols[idx].borderRadius,
-                        strokeColor: newSpec.symbols[idx].strokeColor,
-                        strokeWidth: newSpec.symbols[idx].strokeWidth,
-                        strokeOpacity: newSpec.symbols[idx].strokeOpacity,
-                      } as DeltaColor);
-                    }
+                  const sym = newSpec.symbols[idx];
+                  if (!sym) return;
+                  sym.color = data.color;
+                  sym.opacity = data.opacity;
+                  sym.strokeWidth = data.strokeWidth;
+                  sym.strokeColor = data.strokeColor;
+                  sym.strokeOpacity = data.strokeOpacity;
+                  if (isFinal) {
+                    appendTransformToHistory(sym, 'colorGroup', {
+                      op: '=',
+                      color: data.color,
+                      opacity: data.opacity,
+                      symbolBorderWidth: data.strokeWidth,
+                      symbolBorderColor: data.strokeColor,
+                      symbolBorderOpacity: data.strokeOpacity,
+                      background: sym.background,
+                      backgroundOpacity: sym.backgroundOpacity,
+                      borderRadius: sym.borderRadius,
+                      layerBorderWidth: sym.layerBorderWidth,
+                      layerBorderColor: sym.layerBorderColor,
+                      layerBorderOpacity: sym.layerBorderOpacity,
+                    } as DeltaColor);
                   }
                 });
                 onUpdateCode(stringifySpec(newSpec), isFinal);
               }}
-              onBackgroundChange={(bg, bgOpacity, br, isFinal) => {
+              onLayerChange={(data, isFinal) => {
                 if (!spec || !onUpdateCode) return;
                 const newSpec = JSON.parse(JSON.stringify(spec));
                 selectionSet.forEach(idx => {
-                  if (newSpec.symbols[idx]) {
-                    newSpec.symbols[idx].background = bg;
-                    newSpec.symbols[idx].backgroundOpacity = bgOpacity;
-                    newSpec.symbols[idx].borderRadius = br || undefined;
-                    if (isFinal) {
-                      appendTransformToHistory(newSpec.symbols[idx], 'colorGroup', {
-                        op: '=',
-                        color: newSpec.symbols[idx].color,
-                        opacity: newSpec.symbols[idx].opacity,
-                        background: bg,
-                        backgroundOpacity: bgOpacity,
-                        borderRadius: br || undefined,
-                        strokeColor: newSpec.symbols[idx].strokeColor,
-                        strokeWidth: newSpec.symbols[idx].strokeWidth,
-                        strokeOpacity: newSpec.symbols[idx].strokeOpacity,
-                      } as DeltaColor);
-                    }
-                  }
-                });
-                onUpdateCode(stringifySpec(newSpec), isFinal);
-              }}
-              onStrokeChange={(width, color, opacity, isFinal) => {
-                if (!spec || !onUpdateCode) return;
-                const newSpec = JSON.parse(JSON.stringify(spec));
-                selectionSet.forEach(idx => {
-                  if (newSpec.symbols[idx]) {
-                    newSpec.symbols[idx].strokeWidth = width;
-                    newSpec.symbols[idx].strokeColor = color;
-                    newSpec.symbols[idx].strokeOpacity = opacity;
-                    if (isFinal) {
-                      appendTransformToHistory(newSpec.symbols[idx], 'colorGroup', {
-                        op: '=',
-                        color: newSpec.symbols[idx].color,
-                        opacity: newSpec.symbols[idx].opacity,
-                        background: newSpec.symbols[idx].background,
-                        backgroundOpacity: newSpec.symbols[idx].backgroundOpacity,
-                        borderRadius: newSpec.symbols[idx].borderRadius,
-                        strokeColor: color,
-                        strokeWidth: width,
-                        strokeOpacity: opacity,
-                      } as DeltaColor);
-                    }
+                  const sym = newSpec.symbols[idx];
+                  if (!sym) return;
+                  sym.background = data.background;
+                  sym.backgroundOpacity = data.backgroundOpacity;
+                  sym.borderRadius = data.borderRadius || undefined;
+                  sym.layerBorderWidth = data.layerBorderWidth;
+                  sym.layerBorderColor = data.layerBorderColor;
+                  sym.layerBorderOpacity = data.layerBorderOpacity;
+                  if (isFinal) {
+                    appendTransformToHistory(sym, 'colorGroup', {
+                      op: '=',
+                      color: sym.color,
+                      opacity: sym.opacity,
+                      symbolBorderWidth: sym.strokeWidth,
+                      symbolBorderColor: sym.strokeColor,
+                      symbolBorderOpacity: sym.strokeOpacity,
+                      background: data.background,
+                      backgroundOpacity: data.backgroundOpacity,
+                      borderRadius: data.borderRadius || undefined,
+                      layerBorderWidth: data.layerBorderWidth,
+                      layerBorderColor: data.layerBorderColor,
+                      layerBorderOpacity: data.layerBorderOpacity,
+                    } as DeltaColor);
                   }
                 });
                 onUpdateCode(stringifySpec(newSpec), isFinal);
