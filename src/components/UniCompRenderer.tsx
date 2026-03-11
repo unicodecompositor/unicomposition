@@ -29,14 +29,27 @@ function reResolveAllFromHistory(sym: SymbolSpec) {
   if (resolved.offset) sym.offset = resolved.offset;
   if (resolved.d) sym.bounds = { w: resolved.d.x, h: resolved.d.y };
   if (resolved.colorGroup) {
-    if (resolved.colorGroup.color !== undefined) sym.color = resolved.colorGroup.color;
-    if (resolved.colorGroup.background !== undefined) sym.background = resolved.colorGroup.background;
-    if (resolved.colorGroup.backgroundOpacity !== undefined) sym.backgroundOpacity = resolved.colorGroup.backgroundOpacity;
-    if (resolved.colorGroup.borderRadius !== undefined) sym.borderRadius = resolved.colorGroup.borderRadius;
-    if (resolved.colorGroup.strokeColor !== undefined) sym.strokeColor = resolved.colorGroup.strokeColor;
-    if (resolved.colorGroup.strokeWidth !== undefined) sym.strokeWidth = resolved.colorGroup.strokeWidth;
-    if (resolved.colorGroup.strokeOpacity !== undefined) sym.strokeOpacity = resolved.colorGroup.strokeOpacity;
-    if (resolved.colorGroup.opacity !== undefined) sym.opacity = resolved.colorGroup.opacity;
+    const cg = resolved.colorGroup;
+    if (cg.color !== undefined) sym.color = cg.color;
+    if (cg.opacity !== undefined) sym.opacity = cg.opacity;
+    // Symbol border (b=) — new fields take priority, fallback to legacy
+    if (cg.symbolBorderColor !== undefined) sym.strokeColor = cg.symbolBorderColor;
+    else if (cg.strokeColor !== undefined) sym.strokeColor = cg.strokeColor;
+    if (cg.symbolBorderWidth !== undefined) sym.strokeWidth = cg.symbolBorderWidth;
+    else if (cg.strokeWidth !== undefined) sym.strokeWidth = cg.strokeWidth;
+    if (cg.symbolBorderOpacity !== undefined) sym.strokeOpacity = cg.symbolBorderOpacity;
+    else if (cg.strokeOpacity !== undefined) sym.strokeOpacity = cg.strokeOpacity;
+    // Layer background (bc=)
+    if (cg.layerBackground !== undefined) sym.background = cg.layerBackground;
+    else if (cg.background !== undefined) sym.background = cg.background;
+    if (cg.layerBackgroundOpacity !== undefined) sym.backgroundOpacity = cg.layerBackgroundOpacity;
+    else if (cg.backgroundOpacity !== undefined) sym.backgroundOpacity = cg.backgroundOpacity;
+    if (cg.layerBorderRadius !== undefined) sym.borderRadius = cg.layerBorderRadius;
+    else if (cg.borderRadius !== undefined) sym.borderRadius = cg.borderRadius;
+    // Layer border (bb=)
+    if (cg.layerBorderWidth !== undefined) sym.layerBorderWidth = cg.layerBorderWidth;
+    if (cg.layerBorderColor !== undefined) sym.layerBorderColor = cg.layerBorderColor;
+    if (cg.layerBorderOpacity !== undefined) sym.layerBorderOpacity = cg.layerBorderOpacity;
   }
 }
 import { Move, RotateCw, Maximize2, Diamond, Hexagon, Undo2 } from 'lucide-react';
@@ -743,7 +756,7 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
         const sw = (rect.x2 - rect.x1 + 1) * cellSize;
         const sh = (rect.y2 - rect.y1 + 1) * cellSize;
 
-        // Draw background fill (b=) behind the glyph area
+        // Draw layer background fill (bc=) behind the glyph area
         if (symbol.background) {
           ctx.save();
           const bgOpacity = symbol.backgroundOpacity ?? 1;
@@ -756,24 +769,43 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
             const shortSide = Math.min(sw, sh);
             
             if (brStr.endsWith('%')) {
-              // Percentage: relative to shortest side, 50% = full pill
               const pct = parseFloat(brStr) / 100;
               radiusPx = shortSide * pct;
             } else {
-              // Pixel value
               radiusPx = parseFloat(brStr);
             }
             
-            // Clamp to half of shortest side
             radiusPx = Math.min(radiusPx, shortSide / 2);
             radiusPx = Math.max(0, radiusPx);
             
-            // Draw rounded rect
             ctx.beginPath();
             ctx.roundRect(x1, y1, sw, sh, radiusPx);
             ctx.fill();
           } else {
             ctx.fillRect(x1, y1, sw, sh);
+          }
+          ctx.restore();
+        }
+
+        // Draw layer border (bb=) — separate from symbol border (b=)
+        if (symbol.layerBorderWidth && symbol.layerBorderWidth > 0 && symbol.layerBorderColor) {
+          ctx.save();
+          const lbPx = Math.max(1, symbol.layerBorderWidth * cellSize);
+          ctx.globalAlpha = symbol.layerBorderOpacity ?? 1;
+          ctx.strokeStyle = symbol.layerBorderColor;
+          ctx.lineWidth = lbPx;
+          const halfLb = lbPx / 2;
+          
+          if (symbol.borderRadius) {
+            const brStr = symbol.borderRadius;
+            const shortSide = Math.min(sw, sh);
+            let radiusPx = brStr.endsWith('%') ? shortSide * parseFloat(brStr) / 100 : parseFloat(brStr);
+            radiusPx = Math.min(Math.max(0, radiusPx), shortSide / 2);
+            ctx.beginPath();
+            ctx.roundRect(x1 + halfLb, y1 + halfLb, sw - lbPx, sh - lbPx, Math.max(0, radiusPx - halfLb));
+            ctx.stroke();
+          } else {
+            ctx.strokeRect(x1 + halfLb, y1 + halfLb, sw - lbPx, sh - lbPx);
           }
           ctx.restore();
         }
@@ -1033,82 +1065,72 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
             <ColorStrokePanel
               color={spec?.symbols[selectionSet[0]]?.color}
               opacity={spec?.symbols[selectionSet[0]]?.opacity}
-              background={spec?.symbols[selectionSet[0]]?.background}
-              backgroundOpacity={spec?.symbols[selectionSet[0]]?.backgroundOpacity}
-              borderRadius={spec?.symbols[selectionSet[0]]?.borderRadius}
               strokeWidth={spec?.symbols[selectionSet[0]]?.strokeWidth}
               strokeColor={spec?.symbols[selectionSet[0]]?.strokeColor}
               strokeOpacity={spec?.symbols[selectionSet[0]]?.strokeOpacity}
-              onColorChange={(color, opacity, isFinal) => {
+              background={spec?.symbols[selectionSet[0]]?.background}
+              backgroundOpacity={spec?.symbols[selectionSet[0]]?.backgroundOpacity ?? 1}
+              borderRadius={spec?.symbols[selectionSet[0]]?.borderRadius ?? ''}
+              layerBorderWidth={spec?.symbols[selectionSet[0]]?.layerBorderWidth}
+              layerBorderColor={spec?.symbols[selectionSet[0]]?.layerBorderColor}
+              layerBorderOpacity={spec?.symbols[selectionSet[0]]?.layerBorderOpacity}
+              onSymbolChange={(data, isFinal) => {
                 if (!spec || !onUpdateCode) return;
                 const newSpec = JSON.parse(JSON.stringify(spec));
                 selectionSet.forEach(idx => {
-                  if (newSpec.symbols[idx]) {
-                    newSpec.symbols[idx].color = color;
-                    newSpec.symbols[idx].opacity = opacity;
-                    if (isFinal) {
-                      appendTransformToHistory(newSpec.symbols[idx], 'colorGroup', {
-                        op: '=',
-                        color,
-                        opacity,
-                        background: newSpec.symbols[idx].background,
-                        backgroundOpacity: newSpec.symbols[idx].backgroundOpacity,
-                        borderRadius: newSpec.symbols[idx].borderRadius,
-                        strokeColor: newSpec.symbols[idx].strokeColor,
-                        strokeWidth: newSpec.symbols[idx].strokeWidth,
-                        strokeOpacity: newSpec.symbols[idx].strokeOpacity,
-                      } as DeltaColor);
-                    }
+                  const sym = newSpec.symbols[idx];
+                  if (!sym) return;
+                  sym.color = data.color;
+                  sym.opacity = data.opacity;
+                  sym.strokeWidth = data.strokeWidth;
+                  sym.strokeColor = data.strokeColor;
+                  sym.strokeOpacity = data.strokeOpacity;
+                  if (isFinal) {
+                    appendTransformToHistory(sym, 'colorGroup', {
+                      op: '=',
+                      color: data.color,
+                      opacity: data.opacity,
+                      symbolBorderWidth: data.strokeWidth,
+                      symbolBorderColor: data.strokeColor,
+                      symbolBorderOpacity: data.strokeOpacity,
+                      background: sym.background,
+                      backgroundOpacity: sym.backgroundOpacity,
+                      borderRadius: sym.borderRadius,
+                      layerBorderWidth: sym.layerBorderWidth,
+                      layerBorderColor: sym.layerBorderColor,
+                      layerBorderOpacity: sym.layerBorderOpacity,
+                    } as DeltaColor);
                   }
                 });
                 onUpdateCode(stringifySpec(newSpec), isFinal);
               }}
-              onBackgroundChange={(bg, bgOpacity, br, isFinal) => {
+              onLayerChange={(data, isFinal) => {
                 if (!spec || !onUpdateCode) return;
                 const newSpec = JSON.parse(JSON.stringify(spec));
                 selectionSet.forEach(idx => {
-                  if (newSpec.symbols[idx]) {
-                    newSpec.symbols[idx].background = bg;
-                    newSpec.symbols[idx].backgroundOpacity = bgOpacity;
-                    newSpec.symbols[idx].borderRadius = br || undefined;
-                    if (isFinal) {
-                      appendTransformToHistory(newSpec.symbols[idx], 'colorGroup', {
-                        op: '=',
-                        color: newSpec.symbols[idx].color,
-                        opacity: newSpec.symbols[idx].opacity,
-                        background: bg,
-                        backgroundOpacity: bgOpacity,
-                        borderRadius: br || undefined,
-                        strokeColor: newSpec.symbols[idx].strokeColor,
-                        strokeWidth: newSpec.symbols[idx].strokeWidth,
-                        strokeOpacity: newSpec.symbols[idx].strokeOpacity,
-                      } as DeltaColor);
-                    }
-                  }
-                });
-                onUpdateCode(stringifySpec(newSpec), isFinal);
-              }}
-              onStrokeChange={(width, color, opacity, isFinal) => {
-                if (!spec || !onUpdateCode) return;
-                const newSpec = JSON.parse(JSON.stringify(spec));
-                selectionSet.forEach(idx => {
-                  if (newSpec.symbols[idx]) {
-                    newSpec.symbols[idx].strokeWidth = width;
-                    newSpec.symbols[idx].strokeColor = color;
-                    newSpec.symbols[idx].strokeOpacity = opacity;
-                    if (isFinal) {
-                      appendTransformToHistory(newSpec.symbols[idx], 'colorGroup', {
-                        op: '=',
-                        color: newSpec.symbols[idx].color,
-                        opacity: newSpec.symbols[idx].opacity,
-                        background: newSpec.symbols[idx].background,
-                        backgroundOpacity: newSpec.symbols[idx].backgroundOpacity,
-                        borderRadius: newSpec.symbols[idx].borderRadius,
-                        strokeColor: color,
-                        strokeWidth: width,
-                        strokeOpacity: opacity,
-                      } as DeltaColor);
-                    }
+                  const sym = newSpec.symbols[idx];
+                  if (!sym) return;
+                  sym.background = data.background;
+                  sym.backgroundOpacity = data.backgroundOpacity;
+                  sym.borderRadius = data.borderRadius || undefined;
+                  sym.layerBorderWidth = data.layerBorderWidth;
+                  sym.layerBorderColor = data.layerBorderColor;
+                  sym.layerBorderOpacity = data.layerBorderOpacity;
+                  if (isFinal) {
+                    appendTransformToHistory(sym, 'colorGroup', {
+                      op: '=',
+                      color: sym.color,
+                      opacity: sym.opacity,
+                      symbolBorderWidth: sym.strokeWidth,
+                      symbolBorderColor: sym.strokeColor,
+                      symbolBorderOpacity: sym.strokeOpacity,
+                      background: data.background,
+                      backgroundOpacity: data.backgroundOpacity,
+                      borderRadius: data.borderRadius || undefined,
+                      layerBorderWidth: data.layerBorderWidth,
+                      layerBorderColor: data.layerBorderColor,
+                      layerBorderOpacity: data.layerBorderOpacity,
+                    } as DeltaColor);
                   }
                 });
                 onUpdateCode(stringifySpec(newSpec), isFinal);

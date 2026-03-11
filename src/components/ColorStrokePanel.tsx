@@ -8,7 +8,6 @@ function parseHsl(color?: string): [number, number, number] {
   if (!color) return [185, 80, 50];
   const m = color.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
   if (m) return [parseFloat(m[1]), parseFloat(m[2]), parseFloat(m[3])];
-  // Named colors fallback
   const NAMED: Record<string, [number, number, number]> = {
     red: [0, 80, 55], green: [120, 70, 45], blue: [210, 80, 55],
     yellow: [50, 90, 50], orange: [30, 90, 55], purple: [280, 70, 55],
@@ -22,16 +21,45 @@ function hslToString(h: number, s: number, l: number): string {
   return `hsl(${Math.round(h)}, ${Math.round(s)}%, ${Math.round(l)}%)`;
 }
 
-interface ColorStrokePanelProps {
+/**
+ * New param scheme:
+ * - c= Symbol Color (+ opacity via a=)
+ * - b= Symbol Border (width, color, opacity)
+ * - bc= Layer Background (color, opacity, radius)
+ * - bb= Layer Border (width, color, opacity)
+ */
+export interface ColorStrokePanelProps {
+  // Symbol color (c=)
   color?: string;
   opacity?: number;
-  background?: string;
+  // Symbol border (b=)
   strokeWidth?: number;
   strokeColor?: string;
   strokeOpacity?: number;
-  onColorChange: (color: string, opacity: number, isFinal: boolean) => void;
-  onBackgroundChange: (background: string, isFinal: boolean) => void;
-  onStrokeChange: (width: number, color: string, opacity: number, isFinal: boolean) => void;
+  // Layer background (bc=)
+  background?: string;
+  backgroundOpacity?: number;
+  borderRadius?: string;
+  // Layer border (bb=)
+  layerBorderWidth?: number;
+  layerBorderColor?: string;
+  layerBorderOpacity?: number;
+  // Callbacks
+  onSymbolChange: (data: {
+    color: string;
+    opacity: number;
+    strokeWidth: number;
+    strokeColor: string;
+    strokeOpacity: number;
+  }, isFinal: boolean) => void;
+  onLayerChange: (data: {
+    background: string;
+    backgroundOpacity: number;
+    borderRadius: string;
+    layerBorderWidth: number;
+    layerBorderColor: string;
+    layerBorderOpacity: number;
+  }, isFinal: boolean) => void;
   style?: React.CSSProperties;
 }
 
@@ -42,7 +70,6 @@ const OUTER_R = 50;
 const INNER_R = 32;
 const SEGMENTS = 72;
 
-// Generate arc path for one segment
 function arcPath(i: number, total: number, outerR: number, innerR: number, cx: number, cy: number): string {
   const a0 = ((i / total) * 2 - 0.5) * Math.PI;
   const a1 = (((i + 1) / total) * 2 - 0.5) * Math.PI;
@@ -130,346 +157,289 @@ const ColorWheel: React.FC<{
           fill={`hsl(${(i / SEGMENTS) * 360}, ${saturation}%, ${lightness}%)`}
         />
       ))}
-      {/* Center color preview */}
       <circle cx={CX} cy={CY} r={INNER_R - 3} fill={`hsl(${hue}, ${saturation}%, ${lightness}%)`} />
-      {/* Indicator dot */}
-      <circle
-        cx={indicatorX}
-        cy={indicatorY}
-        r={6}
-        fill="none"
-        stroke="white"
-        strokeWidth={2}
-        style={{ filter: 'drop-shadow(0 0 2px rgba(0,0,0,0.8))' }}
-      />
-      <circle
-        cx={indicatorX}
-        cy={indicatorY}
-        r={4}
-        fill={`hsl(${hue}, ${saturation}%, ${lightness}%)`}
-        stroke="white"
-        strokeWidth={1.5}
-      />
+      <circle cx={indicatorX} cy={indicatorY} r={6} fill="none" stroke="white" strokeWidth={2}
+        style={{ filter: 'drop-shadow(0 0 2px rgba(0,0,0,0.8))' }} />
+      <circle cx={indicatorX} cy={indicatorY} r={4}
+        fill={`hsl(${hue}, ${saturation}%, ${lightness}%)`} stroke="white" strokeWidth={1.5} />
     </svg>
   );
 };
 
+/** Reusable HSL color editor block: wheel + saturation + lightness + optional opacity + optional width */
+const ColorBlock: React.FC<{
+  label: string;
+  hsl: [number, number, number];
+  alpha?: number;
+  width?: number;
+  showAlpha?: boolean;
+  showWidth?: boolean;
+  widthMax?: number;
+  onHslChange: (hsl: [number, number, number], final: boolean) => void;
+  onAlphaChange?: (a: number, final: boolean) => void;
+  onWidthChange?: (w: number, final: boolean) => void;
+}> = ({ label, hsl, alpha = 1, width = 0, showAlpha = false, showWidth = false, widthMax = 0.5, onHslChange, onAlphaChange, onWidthChange }) => {
+  return (
+    <div className="space-y-2">
+      <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</div>
+
+      {showWidth && onWidthChange && (
+        <div>
+          <div className="text-[10px] text-muted-foreground mb-1">Width: {(width * 100).toFixed(1)}%</div>
+          <Slider min={0} max={widthMax} step={0.005} value={[width]}
+            onValueChange={([w]) => onWidthChange(w, false)}
+            onValueCommit={([w]) => onWidthChange(w, true)}
+          />
+        </div>
+      )}
+
+      {(!showWidth || width > 0) && (
+        <>
+          <div className="flex justify-center">
+            <ColorWheel hue={hsl[0]} saturation={hsl[1]} lightness={hsl[2]}
+              onHueChange={(h, final) => onHslChange([h, hsl[1], hsl[2]], final)} />
+          </div>
+
+          <div>
+            <div className="text-[10px] text-muted-foreground mb-1">Saturation {Math.round(hsl[1])}%</div>
+            <input type="range" min={0} max={100} step={1} value={hsl[1]}
+              onChange={(e) => onHslChange([hsl[0], parseInt(e.target.value), hsl[2]], false)}
+              onMouseUp={() => onHslChange(hsl, true)}
+              onTouchEnd={() => onHslChange(hsl, true)}
+              className="color-slider w-full"
+              style={{ background: `linear-gradient(to right, hsl(${hsl[0]}, 0%, ${hsl[2]}%), hsl(${hsl[0]}, 100%, ${hsl[2]}%))` }}
+            />
+          </div>
+
+          <div>
+            <div className="text-[10px] text-muted-foreground mb-1">Lightness {Math.round(hsl[2])}%</div>
+            <input type="range" min={10} max={90} step={1} value={hsl[2]}
+              onChange={(e) => onHslChange([hsl[0], hsl[1], parseInt(e.target.value)], false)}
+              onMouseUp={() => onHslChange(hsl, true)}
+              onTouchEnd={() => onHslChange(hsl, true)}
+              className="color-slider w-full"
+              style={{ background: `linear-gradient(to right, hsl(${hsl[0]}, ${hsl[1]}%, 10%), hsl(${hsl[0]}, ${hsl[1]}%, 50%), hsl(${hsl[0]}, ${hsl[1]}%, 90%))` }}
+            />
+          </div>
+
+          {showAlpha && onAlphaChange && (
+            <div>
+              <div className="text-[10px] text-muted-foreground mb-1">Opacity {Math.round(alpha * 100)}%</div>
+              <Slider min={0} max={1} step={0.01} value={[alpha]}
+                onValueChange={([a]) => onAlphaChange(a, false)}
+                onValueCommit={([a]) => onAlphaChange(a, true)}
+              />
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 export const ColorStrokePanel: React.FC<ColorStrokePanelProps> = ({
-  color,
-  opacity = 1,
-  background,
-  strokeWidth = 0,
-  strokeColor,
-  strokeOpacity = 1,
-  onColorChange,
-  onBackgroundChange,
-  onStrokeChange,
+  color, opacity = 1,
+  strokeWidth = 0, strokeColor, strokeOpacity = 1,
+  background, backgroundOpacity = 1, borderRadius = '',
+  layerBorderWidth = 0, layerBorderColor, layerBorderOpacity = 1,
+  onSymbolChange, onLayerChange,
   style,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<'fill' | 'bg' | 'stroke'>('fill');
+  const [activeTab, setActiveTab] = useState<'symbol' | 'layer'>('symbol');
 
-  const [hsl, setHsl] = useState<[number, number, number]>(() => parseHsl(color));
-  const [alpha, setAlpha] = useState(opacity);
-  
-  const [bgHsl, setBgHsl] = useState<[number, number, number]>(() => parseHsl(background));
-  
-  const [strokeHsl, setStrokeHsl] = useState<[number, number, number]>(() => parseHsl(strokeColor));
-  const [strokeW, setStrokeW] = useState(strokeWidth);
-  const [strokeAlpha, setStrokeAlpha] = useState(strokeOpacity);
+  // Symbol color state (c=)
+  const [symHsl, setSymHsl] = useState<[number, number, number]>(() => parseHsl(color));
+  const [symAlpha, setSymAlpha] = useState(opacity);
+  // Symbol border state (b=)
+  const [symBorderHsl, setSymBorderHsl] = useState<[number, number, number]>(() => parseHsl(strokeColor));
+  const [symBorderW, setSymBorderW] = useState(strokeWidth);
+  const [symBorderAlpha, setSymBorderAlpha] = useState(strokeOpacity);
 
-  // Sync from outside when selection changes
-  useEffect(() => { setHsl(parseHsl(color)); setAlpha(opacity); }, [color, opacity]);
-  useEffect(() => { setBgHsl(parseHsl(background)); }, [background]);
-  useEffect(() => {
-    setStrokeHsl(parseHsl(strokeColor));
-    setStrokeW(strokeWidth);
-    setStrokeAlpha(strokeOpacity);
-  }, [strokeColor, strokeWidth, strokeOpacity]);
+  // Layer background state (bc=)
+  const [layerBgHsl, setLayerBgHsl] = useState<[number, number, number]>(() => parseHsl(background));
+  const [layerBgAlpha, setLayerBgAlpha] = useState(backgroundOpacity);
+  const [layerRadius, setLayerRadius] = useState(borderRadius);
+  // Layer border state (bb=)
+  const [layerBorderHsl, setLayerBorderHsl] = useState<[number, number, number]>(() => parseHsl(layerBorderColor));
+  const [layerBorderW, setLayerBorderW] = useState(layerBorderWidth);
+  const [layerBorderAlphaState, setLayerBorderAlphaState] = useState(layerBorderOpacity);
+
+  // Sync from props
+  useEffect(() => { setSymHsl(parseHsl(color)); setSymAlpha(opacity); }, [color, opacity]);
+  useEffect(() => { setSymBorderHsl(parseHsl(strokeColor)); setSymBorderW(strokeWidth); setSymBorderAlpha(strokeOpacity); }, [strokeColor, strokeWidth, strokeOpacity]);
+  useEffect(() => { setLayerBgHsl(parseHsl(background)); setLayerBgAlpha(backgroundOpacity); setLayerRadius(borderRadius); }, [background, backgroundOpacity, borderRadius]);
+  useEffect(() => { setLayerBorderHsl(parseHsl(layerBorderColor)); setLayerBorderW(layerBorderWidth); setLayerBorderAlphaState(layerBorderOpacity); }, [layerBorderColor, layerBorderWidth, layerBorderOpacity]);
 
   const panelRef = useRef<HTMLDivElement>(null);
-  
-  // Close on outside click
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setIsOpen(false);
     };
     window.addEventListener('mousedown', handler);
     return () => window.removeEventListener('mousedown', handler);
   }, [isOpen]);
 
-  const currentColor = hslToString(hsl[0], hsl[1], hsl[2]);
-  const currentStrokeColor = hslToString(strokeHsl[0], strokeHsl[1], strokeHsl[2]);
+  // Emit helpers
+  const emitSymbol = useCallback((
+    cHsl: [number, number, number], cAlpha: number,
+    bHsl: [number, number, number], bW: number, bAlpha: number,
+    isFinal: boolean
+  ) => {
+    onSymbolChange({
+      color: hslToString(...cHsl),
+      opacity: cAlpha,
+      strokeWidth: bW,
+      strokeColor: hslToString(...bHsl),
+      strokeOpacity: bAlpha,
+    }, isFinal);
+  }, [onSymbolChange]);
+
+  const emitLayer = useCallback((
+    bgHsl: [number, number, number], bgAlpha: number, radius: string,
+    bbHsl: [number, number, number], bbW: number, bbAlpha: number,
+    isFinal: boolean
+  ) => {
+    onLayerChange({
+      background: hslToString(...bgHsl),
+      backgroundOpacity: bgAlpha,
+      borderRadius: radius,
+      layerBorderWidth: bbW,
+      layerBorderColor: hslToString(...bbHsl),
+      layerBorderOpacity: bbAlpha,
+    }, isFinal);
+  }, [onLayerChange]);
+
+  const currentSymColor = hslToString(...symHsl);
+  const currentSymBorderColor = hslToString(...symBorderHsl);
 
   return (
     <div ref={panelRef} style={style} className="absolute z-30 pointer-events-auto">
-      {/* Trigger button */}
+      {/* Trigger */}
       <button
         type="button"
         onClick={() => setIsOpen(v => !v)}
         className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-card/90 border border-border backdrop-blur-sm hover:border-primary/50 transition-colors shadow-lg"
         title="Color & Border"
       >
-        <div
-          className="w-4 h-4 rounded-full border border-border"
-          style={{ background: `hsl(${hsl[0]}, ${hsl[1]}%, ${hsl[2]}%)` }}
-        />
+        <div className="w-4 h-4 rounded-full border border-border"
+          style={{ background: currentSymColor }} />
         <Palette className="w-3.5 h-3.5 text-muted-foreground" />
-        {strokeW > 0 && (
-          <div
-            className="w-4 h-4 rounded-full border-2"
-            style={{ borderColor: currentStrokeColor, background: 'transparent' }}
-          />
+        {symBorderW > 0 && (
+          <div className="w-4 h-4 rounded-full border-2"
+            style={{ borderColor: currentSymBorderColor, background: 'transparent' }} />
         )}
       </button>
 
-      {/* Dropdown popup */}
       {isOpen && (
-        <div className="absolute top-full mt-1.5 left-0 w-[200px] bg-card border border-border rounded-xl shadow-2xl p-3 space-y-3 z-40">
-          {/* Section tabs */}
+        <div className="absolute top-full mt-1.5 left-0 w-[210px] bg-card border border-border rounded-xl shadow-2xl p-3 space-y-3 z-40 max-h-[70vh] overflow-y-auto">
+          {/* Tabs: Symbol | Layer */}
           <div className="flex rounded-md overflow-hidden border border-border text-[11px] font-medium">
-            <button
-              type="button"
-              className={cn("flex-1 py-1 transition-colors", activeSection === 'fill' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}
-              onClick={() => setActiveSection('fill')}
-            >Fill</button>
-            <button
-              type="button"
-              className={cn("flex-1 py-1 transition-colors", activeSection === 'bg' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}
-              onClick={() => setActiveSection('bg')}
-            >BG</button>
-            <button
-              type="button"
-              className={cn("flex-1 py-1 transition-colors", activeSection === 'stroke' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}
-              onClick={() => setActiveSection('stroke')}
-            >Border</button>
+            <button type="button"
+              className={cn("flex-1 py-1 transition-colors", activeTab === 'symbol' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}
+              onClick={() => setActiveTab('symbol')}>Symbol</button>
+            <button type="button"
+              className={cn("flex-1 py-1 transition-colors", activeTab === 'layer' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}
+              onClick={() => setActiveTab('layer')}>Layer</button>
           </div>
 
-          {activeSection === 'fill' ? (
-            <>
-              {/* Color wheel */}
-              <div className="flex justify-center">
-                <ColorWheel
-                  hue={hsl[0]}
-                  saturation={hsl[1]}
-                  lightness={hsl[2]}
-                  onHueChange={(h, final) => {
-                    const newHsl: [number, number, number] = [h, hsl[1], hsl[2]];
-                    setHsl(newHsl);
-                    onColorChange(hslToString(newHsl[0], newHsl[1], newHsl[2]), alpha, final);
-                  }}
-                />
-              </div>
-
-              {/* Saturation slider */}
-              <div>
-                <div className="text-[10px] text-muted-foreground mb-1">Saturation {Math.round(hsl[1])}%</div>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={hsl[1]}
-                  onChange={(e) => {
-                    const s = parseInt(e.target.value);
-                    const newHsl: [number, number, number] = [hsl[0], s, hsl[2]];
-                    setHsl(newHsl);
-                    onColorChange(hslToString(...newHsl), alpha, false);
-                  }}
-                  onMouseUp={() => onColorChange(currentColor, alpha, true)}
-                  onTouchEnd={() => onColorChange(currentColor, alpha, true)}
-                  className="color-slider w-full"
-                  style={{
-                    background: `linear-gradient(to right, hsl(${hsl[0]}, 0%, ${hsl[2]}%), hsl(${hsl[0]}, 100%, ${hsl[2]}%))`
-                  }}
-                />
-              </div>
-
-              {/* Lightness slider */}
-              <div>
-                <div className="text-[10px] text-muted-foreground mb-1">Lightness {Math.round(hsl[2])}%</div>
-                <input
-                  type="range"
-                  min={10}
-                  max={90}
-                  step={1}
-                  value={hsl[2]}
-                  onChange={(e) => {
-                    const l = parseInt(e.target.value);
-                    const newHsl: [number, number, number] = [hsl[0], hsl[1], l];
-                    setHsl(newHsl);
-                    onColorChange(hslToString(...newHsl), alpha, false);
-                  }}
-                  onMouseUp={() => onColorChange(currentColor, alpha, true)}
-                  onTouchEnd={() => onColorChange(currentColor, alpha, true)}
-                  className="color-slider w-full"
-                  style={{
-                    background: `linear-gradient(to right, hsl(${hsl[0]}, ${hsl[1]}%, 10%), hsl(${hsl[0]}, ${hsl[1]}%, 50%), hsl(${hsl[0]}, ${hsl[1]}%, 90%))`
-                  }}
-                />
-              </div>
-
-              {/* Opacity slider */}
-              <div>
-                <div className="text-[10px] text-muted-foreground mb-1">Opacity α = {Math.round(alpha * 100)}%</div>
-                <Slider
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={[alpha]}
-                  onValueChange={([a]) => { setAlpha(a); onColorChange(currentColor, a, false); }}
-                  onValueCommit={([a]) => { setAlpha(a); onColorChange(currentColor, a, true); }}
-                />
-              </div>
-            </>
-          ) : activeSection === 'bg' ? (
-            <>
-              {/* Background color wheel */}
-              <div className="flex justify-center">
-                <ColorWheel
-                  hue={bgHsl[0]}
-                  saturation={bgHsl[1]}
-                  lightness={bgHsl[2]}
-                  onHueChange={(h, final) => {
-                    const newHsl: [number, number, number] = [h, bgHsl[1], bgHsl[2]];
-                    setBgHsl(newHsl);
-                    onBackgroundChange(hslToString(...newHsl), final);
-                  }}
-                />
-              </div>
-              {/* BG Saturation */}
-              <div>
-                <div className="text-[10px] text-muted-foreground mb-1">Saturation {Math.round(bgHsl[1])}%</div>
-                <input
-                  type="range" min={0} max={100} step={1} value={bgHsl[1]}
-                  onChange={(e) => {
-                    const s = parseInt(e.target.value);
-                    const newHsl: [number, number, number] = [bgHsl[0], s, bgHsl[2]];
-                    setBgHsl(newHsl);
-                    onBackgroundChange(hslToString(...newHsl), false);
-                  }}
-                  onMouseUp={() => onBackgroundChange(hslToString(...bgHsl), true)}
-                  onTouchEnd={() => onBackgroundChange(hslToString(...bgHsl), true)}
-                  className="color-slider w-full"
-                  style={{ background: `linear-gradient(to right, hsl(${bgHsl[0]}, 0%, ${bgHsl[2]}%), hsl(${bgHsl[0]}, 100%, ${bgHsl[2]}%))` }}
-                />
-              </div>
-              {/* BG Lightness */}
-              <div>
-                <div className="text-[10px] text-muted-foreground mb-1">Lightness {Math.round(bgHsl[2])}%</div>
-                <input
-                  type="range" min={10} max={90} step={1} value={bgHsl[2]}
-                  onChange={(e) => {
-                    const l = parseInt(e.target.value);
-                    const newHsl: [number, number, number] = [bgHsl[0], bgHsl[1], l];
-                    setBgHsl(newHsl);
-                    onBackgroundChange(hslToString(...newHsl), false);
-                  }}
-                  onMouseUp={() => onBackgroundChange(hslToString(...bgHsl), true)}
-                  onTouchEnd={() => onBackgroundChange(hslToString(...bgHsl), true)}
-                  className="color-slider w-full"
-                  style={{ background: `linear-gradient(to right, hsl(${bgHsl[0]}, ${bgHsl[1]}%, 10%), hsl(${bgHsl[0]}, ${bgHsl[1]}%, 50%), hsl(${bgHsl[0]}, ${bgHsl[1]}%, 90%))` }}
-                />
-              </div>
-            </>
+          {activeTab === 'symbol' ? (
+            <div className="space-y-4">
+              {/* c= Symbol Color */}
+              <ColorBlock
+                label="Color (c=)"
+                hsl={symHsl}
+                alpha={symAlpha}
+                showAlpha
+                onHslChange={(newHsl, final) => {
+                  setSymHsl(newHsl);
+                  emitSymbol(newHsl, symAlpha, symBorderHsl, symBorderW, symBorderAlpha, final);
+                }}
+                onAlphaChange={(a, final) => {
+                  setSymAlpha(a);
+                  emitSymbol(symHsl, a, symBorderHsl, symBorderW, symBorderAlpha, final);
+                }}
+              />
+              <div className="border-t border-border" />
+              {/* b= Symbol Border */}
+              <ColorBlock
+                label="Border (b=)"
+                hsl={symBorderHsl}
+                alpha={symBorderAlpha}
+                width={symBorderW}
+                showAlpha
+                showWidth
+                onHslChange={(newHsl, final) => {
+                  setSymBorderHsl(newHsl);
+                  emitSymbol(symHsl, symAlpha, newHsl, symBorderW, symBorderAlpha, final);
+                }}
+                onAlphaChange={(a, final) => {
+                  setSymBorderAlpha(a);
+                  emitSymbol(symHsl, symAlpha, symBorderHsl, symBorderW, a, final);
+                }}
+                onWidthChange={(w, final) => {
+                  setSymBorderW(w);
+                  emitSymbol(symHsl, symAlpha, symBorderHsl, w, symBorderAlpha, final);
+                }}
+              />
+            </div>
           ) : (
-            <>
-              {/* Stroke width (fraction of cell size, 0..0.5) */}
+            <div className="space-y-4">
+              {/* bc= Layer Background */}
+              <ColorBlock
+                label="Background (bc=)"
+                hsl={layerBgHsl}
+                alpha={layerBgAlpha}
+                showAlpha
+                onHslChange={(newHsl, final) => {
+                  setLayerBgHsl(newHsl);
+                  emitLayer(newHsl, layerBgAlpha, layerRadius, layerBorderHsl, layerBorderW, layerBorderAlphaState, final);
+                }}
+                onAlphaChange={(a, final) => {
+                  setLayerBgAlpha(a);
+                  emitLayer(layerBgHsl, a, layerRadius, layerBorderHsl, layerBorderW, layerBorderAlphaState, final);
+                }}
+              />
+              {/* Radius slider */}
               <div>
-                <div className="text-[10px] text-muted-foreground mb-1">Width: {(strokeW * 100).toFixed(1)}% ({strokeW.toFixed(3)})</div>
-                <Slider
-                  min={0}
-                  max={0.5}
-                  step={0.005}
-                  value={[strokeW]}
-                  onValueChange={([w]) => { setStrokeW(w); onStrokeChange(w, currentStrokeColor, strokeAlpha, false); }}
-                  onValueCommit={([w]) => { setStrokeW(w); onStrokeChange(w, currentStrokeColor, strokeAlpha, true); }}
+                <div className="text-[10px] text-muted-foreground mb-1">Radius: {layerRadius || '0'}</div>
+                <Slider min={0} max={50} step={1} value={[parseFloat(layerRadius) || 0]}
+                  onValueChange={([v]) => {
+                    const r = v > 0 ? `${v}%` : '';
+                    setLayerRadius(r);
+                    emitLayer(layerBgHsl, layerBgAlpha, r, layerBorderHsl, layerBorderW, layerBorderAlphaState, false);
+                  }}
+                  onValueCommit={([v]) => {
+                    const r = v > 0 ? `${v}%` : '';
+                    setLayerRadius(r);
+                    emitLayer(layerBgHsl, layerBgAlpha, r, layerBorderHsl, layerBorderW, layerBorderAlphaState, true);
+                  }}
                 />
               </div>
-
-              {strokeW > 0 && (
-                <>
-                  {/* Stroke color wheel */}
-                  <div className="flex justify-center">
-                    <ColorWheel
-                      hue={strokeHsl[0]}
-                      saturation={strokeHsl[1]}
-                      lightness={strokeHsl[2]}
-                      onHueChange={(h, final) => {
-                        const newHsl: [number, number, number] = [h, strokeHsl[1], strokeHsl[2]];
-                        setStrokeHsl(newHsl);
-                        const sc = hslToString(...newHsl);
-                        onStrokeChange(strokeW, sc, strokeAlpha, final);
-                      }}
-                    />
-                  </div>
-
-                  {/* Stroke saturation */}
-                  <div>
-                    <div className="text-[10px] text-muted-foreground mb-1">Saturation {Math.round(strokeHsl[1])}%</div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={strokeHsl[1]}
-                      onChange={(e) => {
-                        const s = parseInt(e.target.value);
-                        const newHsl: [number, number, number] = [strokeHsl[0], s, strokeHsl[2]];
-                        setStrokeHsl(newHsl);
-                        onStrokeChange(strokeW, hslToString(...newHsl), strokeAlpha, false);
-                      }}
-                      onMouseUp={() => onStrokeChange(strokeW, currentStrokeColor, strokeAlpha, true)}
-                      onTouchEnd={() => onStrokeChange(strokeW, currentStrokeColor, strokeAlpha, true)}
-                      className="color-slider w-full"
-                      style={{
-                        background: `linear-gradient(to right, hsl(${strokeHsl[0]}, 0%, ${strokeHsl[2]}%), hsl(${strokeHsl[0]}, 100%, ${strokeHsl[2]}%))`
-                      }}
-                    />
-                  </div>
-
-                  {/* Stroke lightness */}
-                  <div>
-                    <div className="text-[10px] text-muted-foreground mb-1">Lightness {Math.round(strokeHsl[2])}%</div>
-                    <input
-                      type="range"
-                      min={10}
-                      max={90}
-                      step={1}
-                      value={strokeHsl[2]}
-                      onChange={(e) => {
-                        const l = parseInt(e.target.value);
-                        const newHsl: [number, number, number] = [strokeHsl[0], strokeHsl[1], l];
-                        setStrokeHsl(newHsl);
-                        onStrokeChange(strokeW, hslToString(...newHsl), strokeAlpha, false);
-                      }}
-                      onMouseUp={() => onStrokeChange(strokeW, currentStrokeColor, strokeAlpha, true)}
-                      onTouchEnd={() => onStrokeChange(strokeW, currentStrokeColor, strokeAlpha, true)}
-                      className="color-slider w-full"
-                      style={{
-                        background: `linear-gradient(to right, hsl(${strokeHsl[0]}, ${strokeHsl[1]}%, 10%), hsl(${strokeHsl[0]}, ${strokeHsl[1]}%, 50%), hsl(${strokeHsl[0]}, ${strokeHsl[1]}%, 90%))`
-                      }}
-                    />
-                  </div>
-
-                  {/* Stroke opacity */}
-                  <div>
-                    <div className="text-[10px] text-muted-foreground mb-1">Opacity α = {Math.round(strokeAlpha * 100)}%</div>
-                    <Slider
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={[strokeAlpha]}
-                      onValueChange={([a]) => { setStrokeAlpha(a); onStrokeChange(strokeW, currentStrokeColor, a, false); }}
-                      onValueCommit={([a]) => { setStrokeAlpha(a); onStrokeChange(strokeW, currentStrokeColor, a, true); }}
-                    />
-                  </div>
-                </>
-              )}
-            </>
+              <div className="border-t border-border" />
+              {/* bb= Layer Border */}
+              <ColorBlock
+                label="Border (bb=)"
+                hsl={layerBorderHsl}
+                alpha={layerBorderAlphaState}
+                width={layerBorderW}
+                showAlpha
+                showWidth
+                onHslChange={(newHsl, final) => {
+                  setLayerBorderHsl(newHsl);
+                  emitLayer(layerBgHsl, layerBgAlpha, layerRadius, newHsl, layerBorderW, layerBorderAlphaState, final);
+                }}
+                onAlphaChange={(a, final) => {
+                  setLayerBorderAlphaState(a);
+                  emitLayer(layerBgHsl, layerBgAlpha, layerRadius, layerBorderHsl, layerBorderW, a, final);
+                }}
+                onWidthChange={(w, final) => {
+                  setLayerBorderW(w);
+                  emitLayer(layerBgHsl, layerBgAlpha, layerRadius, layerBorderHsl, w, layerBorderAlphaState, final);
+                }}
+              />
+            </div>
           )}
         </div>
       )}
