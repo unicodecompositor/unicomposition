@@ -743,7 +743,7 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
         const sw = (rect.x2 - rect.x1 + 1) * cellSize;
         const sh = (rect.y2 - rect.y1 + 1) * cellSize;
 
-        // Draw background fill (b=) behind the glyph area
+        // Draw layer background fill (bc=) behind the glyph area
         if (symbol.background) {
           ctx.save();
           const bgOpacity = symbol.backgroundOpacity ?? 1;
@@ -756,24 +756,43 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
             const shortSide = Math.min(sw, sh);
             
             if (brStr.endsWith('%')) {
-              // Percentage: relative to shortest side, 50% = full pill
               const pct = parseFloat(brStr) / 100;
               radiusPx = shortSide * pct;
             } else {
-              // Pixel value
               radiusPx = parseFloat(brStr);
             }
             
-            // Clamp to half of shortest side
             radiusPx = Math.min(radiusPx, shortSide / 2);
             radiusPx = Math.max(0, radiusPx);
             
-            // Draw rounded rect
             ctx.beginPath();
             ctx.roundRect(x1, y1, sw, sh, radiusPx);
             ctx.fill();
           } else {
             ctx.fillRect(x1, y1, sw, sh);
+          }
+          ctx.restore();
+        }
+
+        // Draw layer border (bb=) — separate from symbol border (b=)
+        if (symbol.layerBorderWidth && symbol.layerBorderWidth > 0 && symbol.layerBorderColor) {
+          ctx.save();
+          const lbPx = Math.max(1, symbol.layerBorderWidth * cellSize);
+          ctx.globalAlpha = symbol.layerBorderOpacity ?? 1;
+          ctx.strokeStyle = symbol.layerBorderColor;
+          ctx.lineWidth = lbPx;
+          const halfLb = lbPx / 2;
+          
+          if (symbol.borderRadius) {
+            const brStr = symbol.borderRadius;
+            const shortSide = Math.min(sw, sh);
+            let radiusPx = brStr.endsWith('%') ? shortSide * parseFloat(brStr) / 100 : parseFloat(brStr);
+            radiusPx = Math.min(Math.max(0, radiusPx), shortSide / 2);
+            ctx.beginPath();
+            ctx.roundRect(x1 + halfLb, y1 + halfLb, sw - lbPx, sh - lbPx, Math.max(0, radiusPx - halfLb));
+            ctx.stroke();
+          } else {
+            ctx.strokeRect(x1 + halfLb, y1 + halfLb, sw - lbPx, sh - lbPx);
           }
           ctx.restore();
         }
