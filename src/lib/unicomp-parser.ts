@@ -16,7 +16,7 @@
 export const SECURITY_LIMITS = {
   MAX_INPUT_LENGTH: 10000,
   MAX_SYMBOLS: 1000,
-  MAX_PARAMS_PER_SYMBOL: 10,
+  MAX_PARAMS_PER_SYMBOL: 20,
   MIN_GRID_SIZE: 2,
   MAX_GRID_SIZE: 100,
   TIMEOUT_MS: 100,
@@ -50,14 +50,42 @@ export interface DeltaScale {
   expandTop?: number;
 }
 
+/** Move Expand: grid expansion caused by move beyond grid boundary */
+export interface MoveExpand {
+  el: number; // expand left (columns added)
+  et: number; // expand top (rows added)
+}
+
+/** Scale Expand: grid expansion caused by scale beyond grid boundary */
+export interface ScaleExpand {
+  sl: number; // scale expand left
+  st: number; // scale expand top
+}
+
 export interface DeltaColor {
   op: DeltaOp;
+  /** c= symbol foreground color */
   color?: string;
+  /** b= symbol border: width, color, opacity */
+  symbolBorderWidth?: number;
+  symbolBorderColor?: string;
+  symbolBorderOpacity?: number;
+  /** bc= layer background: color, opacity, radius */
+  layerBackground?: string;
+  layerBackgroundOpacity?: number;
+  layerBorderRadius?: string; // "50%" or "10px"
+  /** bb= layer border: width, color, opacity */
+  layerBorderWidth?: number;
+  layerBorderColor?: string;
+  layerBorderOpacity?: number;
+  opacity?: number;
+  // Legacy compat aliases (mapped on parse)
   background?: string;
+  backgroundOpacity?: number;
+  borderRadius?: string;
   strokeColor?: string;
   strokeWidth?: number;
   strokeOpacity?: number;
-  opacity?: number;
 }
 
 export interface HistoryStep {
@@ -68,8 +96,10 @@ export interface HistoryStep {
   scale?: DeltaScale;
   offset?: DeltaScale;
   d?: DeltaScale; // bounds dimensions (w, h) in grid cells
+  me?: MoveExpand;  // move expand: grid expansion from move
+  se?: ScaleExpand; // scale expand: grid expansion from scale
   opacity?: DeltaNumber;
-  colorGroup?: DeltaColor; // All color params: c, b, bc, bw, bo, a
+  colorGroup?: DeltaColor; // All color params: c, b, bc, bb
 }
 
 export interface KeyframeStep extends HistoryStep {
@@ -81,9 +111,14 @@ export interface SymbolSpec {
   start: number;
   end: number;
   opacity?: number;
+  /** c= Symbol foreground color */
   color?: string;
-  /** Background fill color behind the glyph area */
+  /** bc= Layer background fill color */
   background?: string;
+  /** bc= Layer background opacity (0..1) */
+  backgroundOpacity?: number;
+  /** bc= Layer border radius: "50%" or "10px" */
+  borderRadius?: string;
   rotate?: number;
   flip?: 'h' | 'v' | 'hv';
   fontFamily?: string;
@@ -112,12 +147,18 @@ export interface SymbolSpec {
   history?: HistoryStep[];
   /** Animation keyframes (k= blocks with t= timing) */
   keyframes?: KeyframeStep[];
-  /** Border/stroke width in grid cell fractions (0..1) */
+  /** b= Symbol border width in grid cell fractions (0..1) */
   strokeWidth?: number;
-  /** Border/stroke color (CSS color string) */
+  /** b= Symbol border color (CSS color string) */
   strokeColor?: string;
-  /** Border/stroke opacity (0..1) */
+  /** b= Symbol border opacity (0..1) */
   strokeOpacity?: number;
+  /** bb= Layer border width */
+  layerBorderWidth?: number;
+  /** bb= Layer border color */
+  layerBorderColor?: string;
+  /** bb= Layer border opacity (0..1) */
+  layerBorderOpacity?: number;
 }
 
 export interface GridDimensions {
@@ -135,6 +176,20 @@ export interface UniCompSpec {
   name?: string;
   id?: string;
   className?: string;
+  /** gc= Grid background color */
+  background?: string;
+  /** gc= Grid background opacity */
+  backgroundOpacity?: number;
+  /** gc= Grid border radius */
+  borderRadius?: string;
+  /** gb= Grid border color */
+  strokeColor?: string;
+  /** gb= Grid border width */
+  strokeWidth?: number;
+  /** gb= Grid border opacity */
+  strokeOpacity?: number;
+  /** Grid-level opacity */
+  opacity?: number;
 }
 
 export interface ParseError {
@@ -891,7 +946,7 @@ class Parser {
       let value: string;
 
       // Check if this is an unquoted CSS function like hsl(...), rgb(...), hsla(...), rgba(...)
-      const colorKeys = ['c', 'color', 'bc', 'strokecolor'];
+      const colorKeys = ['c', 'color', 'b', 'bc', 'bb', 'gc', 'gb'];
       if (
         colorKeys.includes(key) &&
         valueToken.type === TokenType.IDENTIFIER &&
@@ -1030,24 +1085,95 @@ class Parser {
           params.position = parseBoxValue(value);
           break;
         }
+        case 'o':
+        case 'offset': {
+          const parts = value.split(',').map(v => v.trim());
+          const ox = parseFloat(parts[0]);
+          const oy = parts.length > 1 ? parseFloat(parts[1]) : ox;
+          if (!isNaN(ox) && !isNaN(oy)) {
+            params.offset = { x: ox, y: oy };
+          }
+          break;
+        }
+        // === NEW PARAM SCHEME ===
+        // b= Symbol Border: "width, H, S%, L%, alpha" or "width, color, alpha"
+        case 'b': {
+          const bMatch = value.match(/^\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*(?:,\s*([\d.]+))?\s*$/);
+          if (bMatch) {
+            params.strokeWidth = parseFloat(bMatch[1]);
+            params.strokeColor = `hsl(${bMatch[2]}, ${bMatch[3]}%, ${bMatch[4]}%)`;
+            if (bMatch[5]) params.strokeOpacity = parseFloat(bMatch[5]);
+          } else {
+            // Legacy: b= was background color — detect if it's a plain color
+            if (isValidColor(value)) {
+              params.background = normalizeColor(value);
+            }
+          }
+          break;
+        }
+        // bc= Layer Background: "H, S%, L%, alpha, radius" or plain color
+        case 'bc': {
+          const bcCompound = value.match(/^\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*(?:,\s*([\d.]+))?\s*(?:,\s*(.+))?\s*$/);
+          if (bcCompound) {
+            params.background = `hsl(${bcCompound[1]}, ${bcCompound[2]}%, ${bcCompound[3]}%)`;
+            if (bcCompound[4]) params.backgroundOpacity = parseFloat(bcCompound[4]);
+            if (bcCompound[5]) params.borderRadius = bcCompound[5].trim();
+          } else {
+            // Legacy: bc= was stroke color — detect compound "Wpx, H, S%, L%"
+            const legacyBc = value.match(/^\s*([\d.]+)px\s*,\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*$/);
+            if (legacyBc) {
+              params.strokeWidth = parseFloat(legacyBc[1]);
+              params.strokeColor = `hsl(${legacyBc[2]}, ${legacyBc[3]}%, ${legacyBc[4]}%)`;
+            } else if (isValidColor(value)) {
+              params.background = normalizeColor(value);
+            }
+          }
+          break;
+        }
+        // bb= Layer Border: "width, H, S%, L%, alpha"
+        case 'bb': {
+          const bbMatch = value.match(/^\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*(?:,\s*([\d.]+))?\s*$/);
+          if (bbMatch) {
+            params.layerBorderWidth = parseFloat(bbMatch[1]);
+            params.layerBorderColor = `hsl(${bbMatch[2]}, ${bbMatch[3]}%, ${bbMatch[4]}%)`;
+            if (bbMatch[5]) params.layerBorderOpacity = parseFloat(bbMatch[5]);
+          }
+          break;
+        }
+        // gc= Grid Background: "H, S%, L%, alpha, radius" or plain color
+        case 'gc': {
+          const gcCompound = value.match(/^\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*(?:,\s*([\d.]+))?\s*(?:,\s*(.+))?\s*$/);
+          if (gcCompound) {
+            params.background = `hsl(${gcCompound[1]}, ${gcCompound[2]}%, ${gcCompound[3]}%)`;
+            if (gcCompound[4]) params.backgroundOpacity = parseFloat(gcCompound[4]);
+            if (gcCompound[5]) params.borderRadius = gcCompound[5].trim();
+          } else if (isValidColor(value)) {
+            params.background = normalizeColor(value);
+          }
+          break;
+        }
+        // gb= Grid Border: "width, H, S%, L%, alpha"
+        case 'gb': {
+          const gbMatch = value.match(/^\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*(?:,\s*([\d.]+))?\s*$/);
+          if (gbMatch) {
+            params.strokeWidth = parseFloat(gbMatch[1]);
+            params.strokeColor = `hsl(${gbMatch[2]}, ${gbMatch[3]}%, ${gbMatch[4]}%)`;
+            if (gbMatch[5]) params.strokeOpacity = parseFloat(gbMatch[5]);
+          }
+          break;
+        }
+        // Legacy compat: keep old param names working
+        case 'background':
+          if (isValidColor(value)) params.background = normalizeColor(value);
+          break;
         case 'bw':
         case 'strokewidth': {
           const bw = parseFloat(value);
           if (!isNaN(bw) && bw >= 0) params.strokeWidth = bw;
           break;
         }
-        case 'bc':
         case 'strokecolor': {
-          // bc="1px, H, S%, L%" — combined width + HSL color
-          // or bc="H, S%, L%" — just color
-          // or bc="colorname" — named color
-          const bcMatch = value.match(/^\s*([\d.]+)px\s*,\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*$/);
-          if (bcMatch) {
-            params.strokeWidth = parseFloat(bcMatch[1]);
-            params.strokeColor = `hsl(${bcMatch[2]}, ${bcMatch[3]}%, ${bcMatch[4]}%)`;
-          } else {
-            params.strokeColor = normalizeColor(value);
-          }
+          params.strokeColor = normalizeColor(value);
           break;
         }
         case 'bo':
@@ -1056,12 +1182,15 @@ class Parser {
           if (!isNaN(bo) && bo >= 0 && bo <= 1) params.strokeOpacity = bo;
           break;
         }
-        case 'b':
-        case 'background':
-          if (!isValidColor(value)) {
-            throw new Error(`Invalid background color: "${value}"`);
-          }
-          params.background = normalizeColor(value);
+        case 'ba':
+        case 'backgroundopacity': {
+          const ba = parseFloat(value);
+          if (!isNaN(ba) && ba >= 0 && ba <= 1) params.backgroundOpacity = ba;
+          break;
+        }
+        case 'br':
+        case 'borderradius':
+          params.borderRadius = value.trim();
           break;
         default:
           break;
@@ -1162,16 +1291,22 @@ class Parser {
         } else if (key === 'o' || key === 'offset') {
           const { x, y } = this._readScalePair();
           step.offset = { op, x, y };
+        } else if (key === 'me' || key === 'moveexpand') {
+          // me= Move Expand: "el, et" — grid expansion from move
+          const { x, y } = this._readScalePair();
+          step.me = { el: x, et: y };
         } else if (key === 'el' || key === 'expandleft') {
-          // Grid expansion left (for move undo)
-          if (step.offset) {
-            (step.offset as any).expandLeft = this._readNum();
-          }
+          // Legacy: el= standalone (map to me)
+          if (!step.me) step.me = { el: 0, et: 0 };
+          step.me.el = this._readNum();
         } else if (key === 'et' || key === 'expandtop') {
-          // Grid expansion top (for move undo)
-          if (step.offset) {
-            (step.offset as any).expandTop = this._readNum();
-          }
+          // Legacy: et= standalone (map to me)
+          if (!step.me) step.me = { el: 0, et: 0 };
+          step.me.et = this._readNum();
+        } else if (key === 'se' || key === 'scaleexpand') {
+          // se= Scale Expand: "sl, st" — grid expansion from scale
+          const { x, y } = this._readScalePair();
+          step.se = { sl: x, st: y };
         } else if (key === 'd' || key === 'bounds') {
           const { x, y } = this._readScalePair();
           step.d = { op, x, y }; // x=w, y=h
@@ -1184,29 +1319,90 @@ class Parser {
           baseParams.color = normalized;
           if (!step.colorGroup) step.colorGroup = { op: '=' };
           step.colorGroup.color = normalized;
-        } else if (key === 'b' || key === 'background') {
+        } else if (key === 'b') {
+          // NEW: b= Symbol Border in h= block: "width, H, S%, L%, alpha"
+          const val = this._readColorValue();
+          const bMatch = val.match(/^\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*(?:,\s*([\d.]+))?\s*$/);
+          if (bMatch) {
+            const sw = parseFloat(bMatch[1]);
+            const sc = `hsl(${bMatch[2]}, ${bMatch[3]}%, ${bMatch[4]}%)`;
+            baseParams.strokeWidth = sw;
+            baseParams.strokeColor = sc;
+            if (!step.colorGroup) step.colorGroup = { op: '=' };
+            step.colorGroup.symbolBorderWidth = sw;
+            step.colorGroup.symbolBorderColor = sc;
+            if (bMatch[5]) {
+              baseParams.strokeOpacity = parseFloat(bMatch[5]);
+              step.colorGroup.symbolBorderOpacity = parseFloat(bMatch[5]);
+            }
+          } else {
+            // Legacy: b= as background color
+            const normalized = normalizeColor(val);
+            baseParams.background = normalized;
+            if (!step.colorGroup) step.colorGroup = { op: '=' };
+            step.colorGroup.background = normalized;
+          }
+        } else if (key === 'bc') {
+          // NEW: bc= Layer Background in h= block: "H, S%, L%, alpha, radius"
+          const val = this._readColorValue();
+          const bcCompound = val.match(/^\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*(?:,\s*([\d.]+))?\s*(?:,\s*(.+))?\s*$/);
+          if (bcCompound) {
+            const bg = `hsl(${bcCompound[1]}, ${bcCompound[2]}%, ${bcCompound[3]}%)`;
+            baseParams.background = bg;
+            if (!step.colorGroup) step.colorGroup = { op: '=' };
+            step.colorGroup.background = bg;
+            if (bcCompound[4]) {
+              baseParams.backgroundOpacity = parseFloat(bcCompound[4]);
+              step.colorGroup.backgroundOpacity = parseFloat(bcCompound[4]);
+            }
+            if (bcCompound[5]) {
+              baseParams.borderRadius = bcCompound[5].trim();
+              step.colorGroup.borderRadius = bcCompound[5].trim();
+            }
+          } else {
+            // Legacy: bc= as stroke color with "Wpx, H, S%, L%"
+            const legacyBc = val.match(/^\s*([\d.]+)px\s*,\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*$/);
+            if (legacyBc) {
+              baseParams.strokeWidth = parseFloat(legacyBc[1]);
+              baseParams.strokeColor = `hsl(${legacyBc[2]}, ${legacyBc[3]}%, ${legacyBc[4]}%)`;
+              if (!step.colorGroup) step.colorGroup = { op: '=' };
+              step.colorGroup.strokeWidth = parseFloat(legacyBc[1]);
+              step.colorGroup.strokeColor = `hsl(${legacyBc[2]}, ${legacyBc[3]}%, ${legacyBc[4]}%)`;
+            } else {
+              const normalized = normalizeColor(val);
+              baseParams.background = normalized;
+              if (!step.colorGroup) step.colorGroup = { op: '=' };
+              step.colorGroup.background = normalized;
+            }
+          }
+        } else if (key === 'bb') {
+          // NEW: bb= Layer Border in h= block
+          const val = this._readColorValue();
+          const bbMatch = val.match(/^\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*(?:,\s*([\d.]+))?\s*$/);
+          if (bbMatch) {
+            baseParams.layerBorderWidth = parseFloat(bbMatch[1]);
+            baseParams.layerBorderColor = `hsl(${bbMatch[2]}, ${bbMatch[3]}%, ${bbMatch[4]}%)`;
+            if (!step.colorGroup) step.colorGroup = { op: '=' };
+            step.colorGroup.layerBorderWidth = parseFloat(bbMatch[1]);
+            step.colorGroup.layerBorderColor = `hsl(${bbMatch[2]}, ${bbMatch[3]}%, ${bbMatch[4]}%)`;
+            if (bbMatch[5]) {
+              baseParams.layerBorderOpacity = parseFloat(bbMatch[5]);
+              step.colorGroup.layerBorderOpacity = parseFloat(bbMatch[5]);
+            }
+          }
+        } else if (key === 'background') {
+          // Legacy compat
           const val = this._readColorValue();
           const normalized = normalizeColor(val);
           baseParams.background = normalized;
           if (!step.colorGroup) step.colorGroup = { op: '=' };
           step.colorGroup.background = normalized;
-        } else if (key === 'bc' || key === 'strokecolor') {
+        } else if (key === 'strokecolor') {
           const val = this._readColorValue();
-          const bcMatch = val.match(/^\s*([\d.]+)px\s*,\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*$/);
-          if (bcMatch) {
-            const sw = parseFloat(bcMatch[1]);
-            const sc = `hsl(${bcMatch[2]}, ${bcMatch[3]}%, ${bcMatch[4]}%)`;
-            baseParams.strokeWidth = sw;
-            baseParams.strokeColor = sc;
-            if (!step.colorGroup) step.colorGroup = { op: '=' };
-            step.colorGroup.strokeWidth = sw;
-            step.colorGroup.strokeColor = sc;
-          } else {
-            const normalized = normalizeColor(val);
-            baseParams.strokeColor = normalized;
-            if (!step.colorGroup) step.colorGroup = { op: '=' };
-            step.colorGroup.strokeColor = normalized;
-          }
+          const normalized = normalizeColor(val);
+          baseParams.strokeColor = normalized;
+          if (!step.colorGroup) step.colorGroup = { op: '=' };
+          step.colorGroup.strokeColor = normalized;
         } else if (key === 'bw' || key === 'strokewidth') {
           const bw = this._readNum();
           baseParams.strokeWidth = bw;
@@ -1217,6 +1413,29 @@ class Parser {
           baseParams.strokeOpacity = bo;
           if (!step.colorGroup) step.colorGroup = { op: '=' };
           step.colorGroup.strokeOpacity = bo;
+        } else if (key === 'ba' || key === 'backgroundopacity') {
+          const ba = this._readNum();
+          baseParams.backgroundOpacity = ba;
+          if (!step.colorGroup) step.colorGroup = { op: '=' };
+          step.colorGroup.backgroundOpacity = ba;
+        } else if (key === 'br' || key === 'borderradius') {
+          let brVal: string;
+          if (this.currentToken().type === TokenType.QUOTED_STRING) {
+            brVal = this.currentToken().value.trim();
+            this.advance();
+          } else {
+            let raw = '';
+            while (this.currentToken().type !== TokenType.SEMICOLON &&
+                   this.currentToken().type !== TokenType.RBRACKET &&
+                   this.currentToken().type !== TokenType.EOF) {
+              raw += this.currentToken().value;
+              this.advance();
+            }
+            brVal = raw.trim();
+          }
+          baseParams.borderRadius = brVal;
+          if (!step.colorGroup) step.colorGroup = { op: '=' };
+          step.colorGroup.borderRadius = brVal;
         } else if (key === 'f' || key === 'flip') {
           if (this.currentToken().type === TokenType.QUOTED_STRING || this.currentToken().type === TokenType.IDENTIFIER) {
             baseParams.flip = this.currentToken().value as any;
@@ -1407,6 +1626,8 @@ class Parser {
           if (resolved.colorGroup) {
             if (resolved.colorGroup.color !== undefined) params.color = resolved.colorGroup.color;
             if (resolved.colorGroup.background !== undefined) params.background = resolved.colorGroup.background;
+            if (resolved.colorGroup.backgroundOpacity !== undefined) params.backgroundOpacity = resolved.colorGroup.backgroundOpacity;
+            if (resolved.colorGroup.borderRadius !== undefined) params.borderRadius = resolved.colorGroup.borderRadius;
             if (resolved.colorGroup.strokeColor !== undefined) params.strokeColor = resolved.colorGroup.strokeColor;
             if (resolved.colorGroup.strokeWidth !== undefined) params.strokeWidth = resolved.colorGroup.strokeWidth;
             if (resolved.colorGroup.strokeOpacity !== undefined) params.strokeOpacity = resolved.colorGroup.strokeOpacity;
@@ -1429,10 +1650,22 @@ class Parser {
           if (resolved.d) params.bounds = { w: resolved.d.x, h: resolved.d.y };
           if (resolved.colorGroup) {
             if (resolved.colorGroup.color !== undefined) params.color = resolved.colorGroup.color;
-            if (resolved.colorGroup.background !== undefined) params.background = resolved.colorGroup.background;
-            if (resolved.colorGroup.strokeColor !== undefined) params.strokeColor = resolved.colorGroup.strokeColor;
-            if (resolved.colorGroup.strokeWidth !== undefined) params.strokeWidth = resolved.colorGroup.strokeWidth;
-            if (resolved.colorGroup.strokeOpacity !== undefined) params.strokeOpacity = resolved.colorGroup.strokeOpacity;
+            // Map new and legacy field names
+            if (resolved.colorGroup.layerBackground !== undefined) params.background = resolved.colorGroup.layerBackground;
+            else if (resolved.colorGroup.background !== undefined) params.background = resolved.colorGroup.background;
+            if (resolved.colorGroup.layerBackgroundOpacity !== undefined) params.backgroundOpacity = resolved.colorGroup.layerBackgroundOpacity;
+            else if (resolved.colorGroup.backgroundOpacity !== undefined) params.backgroundOpacity = resolved.colorGroup.backgroundOpacity;
+            if (resolved.colorGroup.layerBorderRadius !== undefined) params.borderRadius = resolved.colorGroup.layerBorderRadius;
+            else if (resolved.colorGroup.borderRadius !== undefined) params.borderRadius = resolved.colorGroup.borderRadius;
+            if (resolved.colorGroup.symbolBorderColor !== undefined) params.strokeColor = resolved.colorGroup.symbolBorderColor;
+            else if (resolved.colorGroup.strokeColor !== undefined) params.strokeColor = resolved.colorGroup.strokeColor;
+            if (resolved.colorGroup.symbolBorderWidth !== undefined) params.strokeWidth = resolved.colorGroup.symbolBorderWidth;
+            else if (resolved.colorGroup.strokeWidth !== undefined) params.strokeWidth = resolved.colorGroup.strokeWidth;
+            if (resolved.colorGroup.symbolBorderOpacity !== undefined) params.strokeOpacity = resolved.colorGroup.symbolBorderOpacity;
+            else if (resolved.colorGroup.strokeOpacity !== undefined) params.strokeOpacity = resolved.colorGroup.strokeOpacity;
+            if (resolved.colorGroup.layerBorderWidth !== undefined) params.layerBorderWidth = resolved.colorGroup.layerBorderWidth;
+            if (resolved.colorGroup.layerBorderColor !== undefined) params.layerBorderColor = resolved.colorGroup.layerBorderColor;
+            if (resolved.colorGroup.layerBorderOpacity !== undefined) params.layerBorderOpacity = resolved.colorGroup.layerBorderOpacity;
             if (resolved.colorGroup.opacity !== undefined) params.opacity = resolved.colorGroup.opacity;
           }
         }
@@ -1473,15 +1706,29 @@ class Parser {
         throw new Error(`Grid height must be between ${SECURITY_LIMITS.MIN_GRID_SIZE} and ${SECURITY_LIMITS.MAX_GRID_SIZE}`);
       }
 
-      // Parse optional grid-level parameters: (W×H)[id="...";class="..."]:
+      // Parse optional grid-level parameters: (W×H)[id="...";class="...";b="...";bc="..."]:
       let gridId: string | undefined;
       let gridClassName: string | undefined;
       let gridName: string | undefined;
+      let gridBackground: string | undefined;
+      let gridBackgroundOpacity: number | undefined;
+      let gridBorderRadius: string | undefined;
+      let gridStrokeColor: string | undefined;
+      let gridStrokeWidth: number | undefined;
+      let gridStrokeOpacity: number | undefined;
+      let gridOpacity: number | undefined;
       if (this.currentToken().type === TokenType.LBRACKET) {
         const gridParams = this.parseParameters();
         gridId = gridParams.id;
         gridClassName = gridParams.className;
         gridName = gridParams.name;
+        gridBackground = gridParams.background;
+        gridBackgroundOpacity = gridParams.backgroundOpacity;
+        gridBorderRadius = gridParams.borderRadius;
+        gridStrokeColor = gridParams.strokeColor;
+        gridStrokeWidth = gridParams.strokeWidth;
+        gridStrokeOpacity = gridParams.strokeOpacity;
+        gridOpacity = gridParams.opacity;
       }
 
       this.expect(TokenType.COLON);
@@ -1513,6 +1760,13 @@ class Parser {
           id: gridId,
           className: gridClassName,
           name: gridName,
+          background: gridBackground,
+          backgroundOpacity: gridBackgroundOpacity,
+          borderRadius: gridBorderRadius,
+          strokeColor: gridStrokeColor,
+          strokeWidth: gridStrokeWidth,
+          strokeOpacity: gridStrokeOpacity,
+          opacity: gridOpacity,
         },
       };
     } catch (e) {
@@ -1729,31 +1983,58 @@ function serializeStep(step: HistoryStep | KeyframeStep, type: 'h' | 'k', skipCo
   if (step.rotate) parts.push(`r${step.rotate.op}${step.rotate.value}`);
   if (step.scale) parts.push(`s${step.scale.op}${step.scale.x},${step.scale.y}`);
   if (step.offset) {
-    let offsetStr = `o${step.offset.op}${step.offset.x},${step.offset.y}`;
-    if ((step.offset as any).expandLeft || (step.offset as any).expandTop) {
-      offsetStr += `;el=${(step.offset as any).expandLeft || 0};et=${(step.offset as any).expandTop || 0}`;
-    }
-    parts.push(offsetStr);
+    parts.push(`o${step.offset.op}${step.offset.x},${step.offset.y}`);
+  }
+  if (step.me && (step.me.el || step.me.et)) {
+    parts.push(`me=${step.me.el},${step.me.et}`);
+  }
+  if (step.se && (step.se.sl || step.se.st)) {
+    parts.push(`se=${step.se.sl},${step.se.st}`);
   }
   if (step.d) parts.push(`d${step.d.op}${step.d.x},${step.d.y}`);
   if (step.opacity) parts.push(`a${step.opacity.op}${step.opacity.value}`);
   if (step.colorGroup && !skipColorGroup) {
     if (step.colorGroup.color !== undefined) parts.push(`c="${step.colorGroup.color}"`);
-    if (step.colorGroup.background !== undefined) parts.push(`b="${step.colorGroup.background}"`);
     if (step.colorGroup.opacity !== undefined) parts.push(`a=${step.colorGroup.opacity}`);
-    if (step.colorGroup.strokeColor !== undefined && step.colorGroup.strokeWidth !== undefined && step.colorGroup.strokeWidth > 0) {
-      const hslM = step.colorGroup.strokeColor.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
+    // b= Symbol Border
+    const sw = step.colorGroup.symbolBorderWidth ?? step.colorGroup.strokeWidth;
+    const sc = step.colorGroup.symbolBorderColor ?? step.colorGroup.strokeColor;
+    const so = step.colorGroup.symbolBorderOpacity ?? step.colorGroup.strokeOpacity;
+    if (sw !== undefined && sw > 0 && sc) {
+      const hslM = sc.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
       if (hslM) {
-        parts.push(`bc="${step.colorGroup.strokeWidth}px, ${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%"`);
-      } else {
-        if (step.colorGroup.strokeWidth) parts.push(`bw=${step.colorGroup.strokeWidth}`);
-        if (step.colorGroup.strokeColor) parts.push(`bc="${step.colorGroup.strokeColor}"`);
+        let bVal = `${sw}, ${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%`;
+        if (so !== undefined && so < 1) bVal += `, ${so}`;
+        parts.push(`b="${bVal}"`);
       }
-    } else {
-      if (step.colorGroup.strokeWidth !== undefined && step.colorGroup.strokeWidth > 0) parts.push(`bw=${step.colorGroup.strokeWidth}`);
-      if (step.colorGroup.strokeColor !== undefined) parts.push(`bc="${step.colorGroup.strokeColor}"`);
     }
-    if (step.colorGroup.strokeOpacity !== undefined && step.colorGroup.strokeOpacity < 1) parts.push(`bo=${step.colorGroup.strokeOpacity}`);
+    // bc= Layer Background
+    const bg = step.colorGroup.layerBackground ?? step.colorGroup.background;
+    const bgO = step.colorGroup.layerBackgroundOpacity ?? step.colorGroup.backgroundOpacity;
+    const bgR = step.colorGroup.layerBorderRadius ?? step.colorGroup.borderRadius;
+    if (bg !== undefined) {
+      const hslM = bg.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
+      if (hslM) {
+        let bcVal = `${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%`;
+        if (bgO !== undefined && bgO < 1) bcVal += `, ${bgO}`;
+        if (bgR) bcVal += `, ${bgR}`;
+        parts.push(`bc="${bcVal}"`);
+      } else {
+        parts.push(`bc="${bg}"`);
+      }
+    }
+    // bb= Layer Border
+    const lbw = step.colorGroup.layerBorderWidth;
+    const lbc = step.colorGroup.layerBorderColor;
+    const lbo = step.colorGroup.layerBorderOpacity;
+    if (lbw !== undefined && lbw > 0 && lbc) {
+      const hslM = lbc.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
+      if (hslM) {
+        let bbVal = `${lbw}, ${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%`;
+        if (lbo !== undefined && lbo < 1) bbVal += `, ${lbo}`;
+        parts.push(`bb="${bbVal}"`);
+      }
+    }
   }
   return `[${parts.join(';')}]`;
 }
@@ -1777,6 +2058,30 @@ export function stringifySpec(spec: UniCompSpec): string {
   if (spec.id) gridParams.push(serializeParam('id', spec.id));
   if (spec.className) gridParams.push(serializeParam('class', spec.className));
   if (spec.name) gridParams.push(serializeParam('n', spec.name));
+  // gc= Grid Background: "H, S%, L%, alpha, radius"
+  if (spec.background) {
+    const hslM = spec.background.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
+    if (hslM) {
+      let gcVal = `${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%`;
+      if (spec.backgroundOpacity !== undefined && spec.backgroundOpacity < 1) gcVal += `, ${spec.backgroundOpacity}`;
+      if (spec.borderRadius) gcVal += `, ${spec.borderRadius}`;
+      gridParams.push(`gc="${gcVal}"`);
+    } else {
+      gridParams.push(serializeParam('gc', spec.background));
+    }
+  }
+  if (spec.opacity !== undefined && spec.opacity < 1) gridParams.push(`a=${spec.opacity}`);
+  // gb= Grid Border: "width, H, S%, L%, alpha"
+  if (spec.strokeWidth !== undefined && spec.strokeWidth > 0) {
+    const hslM = spec.strokeColor?.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
+    if (hslM) {
+      let gbVal = `${spec.strokeWidth}, ${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%`;
+      if (spec.strokeOpacity !== undefined && spec.strokeOpacity < 1) gbVal += `, ${spec.strokeOpacity}`;
+      gridParams.push(`gb="${gbVal}"`);
+    } else if (spec.strokeColor) {
+      gridParams.push(`gb="${spec.strokeWidth}, ${spec.strokeColor}"`);
+    }
+  }
   const gridParamsPart = gridParams.length > 0 ? `[${gridParams.join(';')}]` : '';
 
   // Build non-transform base param entries (color, opacity, flip, font, id, etc.)
@@ -1787,32 +2092,51 @@ export function stringifySpec(spec: UniCompSpec): string {
     const historyHas = (param: string) => sym.history?.some(step => (step as any)[param] !== undefined) ?? false;
 
     if (sym.color) p.push(serializeParam('c', sym.color));
-    if (sym.background) p.push(serializeParam('b', sym.background));
     if (sym.opacity !== undefined) p.push(serializeParam('a', sym.opacity));
     if (sym.flip) p.push(serializeParam('f', sym.flip));
     if (sym.fontFamily) p.push(serializeParam('font', sym.fontFamily));
     if (sym.id) p.push(serializeParam('id', sym.id));
     if (sym.className) p.push(serializeParam('class', sym.className));
     if (sym.name) p.push(serializeParam('n', sym.name));
-    // Transform params NOT already in history steps — prevents r=/sp=/st=/s= from being erased
+    // Transform params NOT already in history steps
     if (sym.rotate !== undefined && !historyHas('rotate')) p.push(serializeParam('r', sym.rotate));
     if (sym.sp && !historyHas('sp')) p.push(`sp="${sym.sp.angle},${sym.sp.force}"`);
     if (sym.st && !historyHas('st')) p.push(`st="${sym.st.angle},${sym.st.force}"`);
     if (sym.scale && !historyHas('scale')) p.push(`s=${sym.scale.x}${sym.scale.y !== sym.scale.x ? `,${sym.scale.y}` : ''}`);
-    // Border/stroke params
-    if (sym.strokeColor && sym.strokeWidth !== undefined && sym.strokeWidth > 0) {
-      const hslM = sym.strokeColor.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
+    // b= Symbol Border: "width, H, S%, L%, alpha"
+    if (sym.strokeWidth !== undefined && sym.strokeWidth > 0) {
+      const hslM = sym.strokeColor?.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
       if (hslM) {
-        p.push(`bc="${sym.strokeWidth}px, ${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%"`);
-      } else {
-        p.push(`bw=${sym.strokeWidth}`);
-        p.push(`bc=${sym.strokeColor}`);
+        let bVal = `${sym.strokeWidth}, ${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%`;
+        if (sym.strokeOpacity !== undefined && sym.strokeOpacity < 1) bVal += `, ${sym.strokeOpacity}`;
+        p.push(`b="${bVal}"`);
+      } else if (sym.strokeColor) {
+        p.push(`b="${sym.strokeWidth}, ${sym.strokeColor}"`);
       }
-    } else {
-      if (sym.strokeWidth !== undefined && sym.strokeWidth > 0) p.push(`bw=${sym.strokeWidth}`);
-      if (sym.strokeColor) p.push(`bc=${sym.strokeColor}`);
     }
-    if (sym.strokeOpacity !== undefined && sym.strokeOpacity < 1) p.push(`bo=${sym.strokeOpacity}`);
+    // bc= Layer Background: "H, S%, L%, alpha, radius"
+    if (sym.background) {
+      const hslM = sym.background.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
+      if (hslM) {
+        let bcVal = `${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%`;
+        if (sym.backgroundOpacity !== undefined && sym.backgroundOpacity < 1) bcVal += `, ${sym.backgroundOpacity}`;
+        if (sym.borderRadius) bcVal += `, ${sym.borderRadius}`;
+        p.push(`bc="${bcVal}"`);
+      } else {
+        p.push(serializeParam('bc', sym.background));
+      }
+    }
+    // bb= Layer Border: "width, H, S%, L%, alpha"
+    if (sym.layerBorderWidth !== undefined && sym.layerBorderWidth > 0) {
+      const hslM = sym.layerBorderColor?.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
+      if (hslM) {
+        let bbVal = `${sym.layerBorderWidth}, ${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%`;
+        if (sym.layerBorderOpacity !== undefined && sym.layerBorderOpacity < 1) bbVal += `, ${sym.layerBorderOpacity}`;
+        p.push(`bb="${bbVal}"`);
+      } else if (sym.layerBorderColor) {
+        p.push(`bb="${sym.layerBorderWidth}, ${sym.layerBorderColor}"`);
+      }
+    }
     return p;
   }
 
@@ -1852,11 +2176,10 @@ export function stringifySpec(spec: UniCompSpec): string {
       return `${charPart}${blocks}${sym.start}-${sym.end}`;
     }
 
-    // Regular params (backward compat)
+    // Regular params (no history) — use new param scheme
     let params = '';
     const p: string[] = [];
     if (sym.color) p.push(serializeParam('c', sym.color));
-    if (sym.background) p.push(serializeParam('b', sym.background));
     if (sym.opacity !== undefined) p.push(serializeParam('a', sym.opacity));
     if (sym.rotate !== undefined) p.push(serializeParam('r', sym.rotate));
     if (sym.flip) p.push(serializeParam('f', sym.flip));
@@ -1867,21 +2190,41 @@ export function stringifySpec(spec: UniCompSpec): string {
     if (sym.scale) p.push(`s=${sym.scale.x}${sym.scale.y !== sym.scale.x ? `,${sym.scale.y}` : ''}`);
     if (sym.sp) p.push(`sp="${sym.sp.angle},${sym.sp.force}"`);
     if (sym.st) p.push(`st="${sym.st.angle},${sym.st.force}"`);
-    // Serialize border: combine width+color into bc= if both present
-    if (sym.strokeColor && sym.strokeWidth !== undefined && sym.strokeWidth > 0) {
-      // Extract HSL components for compact format
-      const hslM = sym.strokeColor.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
+    if (sym.offset) p.push(`o=${sym.offset.x},${sym.offset.y}`);
+    // b= Symbol Border: "width, H, S%, L%, alpha"
+    if (sym.strokeWidth !== undefined && sym.strokeWidth > 0) {
+      const hslM = sym.strokeColor?.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
       if (hslM) {
-        p.push(`bc="${sym.strokeWidth}px, ${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%"`);
-      } else {
-        p.push(`bw=${sym.strokeWidth}`);
-        p.push(`bc=${sym.strokeColor}`);
+        let bVal = `${sym.strokeWidth}, ${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%`;
+        if (sym.strokeOpacity !== undefined && sym.strokeOpacity < 1) bVal += `, ${sym.strokeOpacity}`;
+        p.push(`b="${bVal}"`);
+      } else if (sym.strokeColor) {
+        p.push(`b="${sym.strokeWidth}, ${sym.strokeColor}"`);
       }
-    } else {
-      if (sym.strokeWidth !== undefined && sym.strokeWidth > 0) p.push(`bw=${sym.strokeWidth}`);
-      if (sym.strokeColor) p.push(`bc=${sym.strokeColor}`);
     }
-    if (sym.strokeOpacity !== undefined && sym.strokeOpacity < 1) p.push(`bo=${sym.strokeOpacity}`);
+    // bc= Layer Background: "H, S%, L%, alpha, radius"
+    if (sym.background) {
+      const hslM = sym.background.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
+      if (hslM) {
+        let bcVal = `${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%`;
+        if (sym.backgroundOpacity !== undefined && sym.backgroundOpacity < 1) bcVal += `, ${sym.backgroundOpacity}`;
+        if (sym.borderRadius) bcVal += `, ${sym.borderRadius}`;
+        p.push(`bc="${bcVal}"`);
+      } else {
+        p.push(serializeParam('bc', sym.background));
+      }
+    }
+    // bb= Layer Border: "width, H, S%, L%, alpha"
+    if (sym.layerBorderWidth !== undefined && sym.layerBorderWidth > 0) {
+      const hslM = sym.layerBorderColor?.match(/hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%?\s*,\s*([\d.]+)%?\s*\)/);
+      if (hslM) {
+        let bbVal = `${sym.layerBorderWidth}, ${hslM[1]}, ${hslM[2]}%, ${hslM[3]}%`;
+        if (sym.layerBorderOpacity !== undefined && sym.layerBorderOpacity < 1) bbVal += `, ${sym.layerBorderOpacity}`;
+        p.push(`bb="${bbVal}"`);
+      } else if (sym.layerBorderColor) {
+        p.push(`bb="${sym.layerBorderWidth}, ${sym.layerBorderColor}"`);
+      }
+    }
     
     if (p.length > 0) params = `[${p.join(';')}]`;
     
@@ -1944,7 +2287,9 @@ export function resolveHistory(steps: HistoryStep[]): {
   scale?: { x: number; y: number };
   offset?: { x: number; y: number };
   d?: { x: number; y: number }; // bounds: x=w, y=h
-  colorGroup?: { color?: string; background?: string; strokeColor?: string; strokeWidth?: number; strokeOpacity?: number; opacity?: number };
+  me?: MoveExpand;
+  se?: ScaleExpand;
+  colorGroup?: DeltaColor;
 } {
   let st: { angle: number; force: number } | undefined;
   let sp: { angle: number; force: number } | undefined;
@@ -1952,7 +2297,9 @@ export function resolveHistory(steps: HistoryStep[]): {
   let scale: { x: number; y: number } | undefined;
   let offset: { x: number; y: number } | undefined;
   let d: { x: number; y: number } | undefined;
-  let colorGroup: { color?: string; background?: string; strokeColor?: string; strokeWidth?: number; strokeOpacity?: number; opacity?: number } | undefined;
+  let me: MoveExpand | undefined;
+  let se: ScaleExpand | undefined;
+  let colorGroup: DeltaColor | undefined;
 
   for (const step of steps) {
     if (step.st) {
@@ -2013,8 +2360,17 @@ export function resolveHistory(steps: HistoryStep[]): {
       // Color is always absolute replace (op='='), no deltas
       colorGroup = { ...step.colorGroup };
     }
+    // me/se are additive (accumulate expansions)
+    if (step.me) {
+      if (!me) me = { el: step.me.el, et: step.me.et };
+      else { me = { el: me.el + step.me.el, et: me.et + step.me.et }; }
+    }
+    if (step.se) {
+      if (!se) se = { sl: step.se.sl, st: step.se.st };
+      else { se = { sl: se.sl + step.se.sl, st: se.st + step.se.st }; }
+    }
   }
-  return { st, sp, rotate, scale, offset, d, colorGroup };
+  return { st, sp, rotate, scale, offset, d, me, se, colorGroup };
 }
 
 /**
@@ -2036,13 +2392,29 @@ export function appendTransformToHistory(
     const colorVal = newValue as DeltaColor;
     const step: HistoryStep = { index: nextIndex, colorGroup: { ...colorVal, op: '=' } };
     sym.history.push(step);
-    // Apply to sym
+    // Apply to sym — map new field names to SymbolSpec fields
     if (colorVal.color !== undefined) sym.color = colorVal.color;
-    if (colorVal.background !== undefined) sym.background = colorVal.background;
-    if (colorVal.opacity !== undefined) sym.opacity = colorVal.opacity;
+    // b= symbol border
+    if (colorVal.symbolBorderColor !== undefined) sym.strokeColor = colorVal.symbolBorderColor;
+    if (colorVal.symbolBorderWidth !== undefined) sym.strokeWidth = colorVal.symbolBorderWidth;
+    if (colorVal.symbolBorderOpacity !== undefined) sym.strokeOpacity = colorVal.symbolBorderOpacity;
+    // Legacy compat
     if (colorVal.strokeColor !== undefined) sym.strokeColor = colorVal.strokeColor;
     if (colorVal.strokeWidth !== undefined) sym.strokeWidth = colorVal.strokeWidth;
     if (colorVal.strokeOpacity !== undefined) sym.strokeOpacity = colorVal.strokeOpacity;
+    // bc= layer background
+    if (colorVal.layerBackground !== undefined) sym.background = colorVal.layerBackground;
+    if (colorVal.layerBackgroundOpacity !== undefined) sym.backgroundOpacity = colorVal.layerBackgroundOpacity;
+    if (colorVal.layerBorderRadius !== undefined) sym.borderRadius = colorVal.layerBorderRadius;
+    // Legacy compat
+    if (colorVal.background !== undefined) sym.background = colorVal.background;
+    if (colorVal.backgroundOpacity !== undefined) sym.backgroundOpacity = colorVal.backgroundOpacity;
+    if (colorVal.borderRadius !== undefined) sym.borderRadius = colorVal.borderRadius;
+    // bb= layer border
+    if (colorVal.layerBorderWidth !== undefined) sym.layerBorderWidth = colorVal.layerBorderWidth;
+    if (colorVal.layerBorderColor !== undefined) sym.layerBorderColor = colorVal.layerBorderColor;
+    if (colorVal.layerBorderOpacity !== undefined) sym.layerBorderOpacity = colorVal.layerBorderOpacity;
+    if (colorVal.opacity !== undefined) sym.opacity = colorVal.opacity;
     return;
   }
 
@@ -2147,7 +2519,7 @@ export function undoLastHistoryParam(
     if (paramType === 'd') step.d = undefined;
     if (paramType === 'colorGroup') step.colorGroup = undefined;
 
-    if (!step.st && !step.sp && !step.rotate && !step.scale && !step.offset && !step.d && !step.opacity && !step.colorGroup) {
+    if (!step.st && !step.sp && !step.rotate && !step.scale && !step.offset && !step.d && !step.me && !step.se && !step.opacity && !step.colorGroup) {
       sym.history.splice(i, 1);
     }
 
@@ -2157,6 +2529,8 @@ export function undoLastHistoryParam(
       sym.history = undefined;
       sym.st = undefined; sym.sp = undefined; sym.rotate = undefined; sym.scale = undefined; sym.offset = undefined; sym.bounds = undefined;
       sym.color = undefined; sym.background = undefined; sym.strokeColor = undefined; sym.strokeWidth = undefined; sym.strokeOpacity = undefined;
+      sym.layerBorderWidth = undefined; sym.layerBorderColor = undefined; sym.layerBorderOpacity = undefined;
+      sym.backgroundOpacity = undefined; sym.borderRadius = undefined;
     } else {
       const resolved = resolveHistory(sym.history);
       sym.st = resolved.st;
@@ -2167,14 +2541,21 @@ export function undoLastHistoryParam(
       sym.bounds = resolved.d ? { w: resolved.d.x, h: resolved.d.y } : undefined;
       if (resolved.colorGroup) {
         sym.color = resolved.colorGroup.color;
-        sym.background = resolved.colorGroup.background;
-        sym.strokeColor = resolved.colorGroup.strokeColor;
-        sym.strokeWidth = resolved.colorGroup.strokeWidth;
-        sym.strokeOpacity = resolved.colorGroup.strokeOpacity;
+        sym.background = resolved.colorGroup.background ?? resolved.colorGroup.layerBackground;
+        sym.backgroundOpacity = resolved.colorGroup.backgroundOpacity ?? resolved.colorGroup.layerBackgroundOpacity;
+        sym.borderRadius = resolved.colorGroup.borderRadius ?? resolved.colorGroup.layerBorderRadius;
+        sym.strokeColor = resolved.colorGroup.strokeColor ?? resolved.colorGroup.symbolBorderColor;
+        sym.strokeWidth = resolved.colorGroup.strokeWidth ?? resolved.colorGroup.symbolBorderWidth;
+        sym.strokeOpacity = resolved.colorGroup.strokeOpacity ?? resolved.colorGroup.symbolBorderOpacity;
+        sym.layerBorderWidth = resolved.colorGroup.layerBorderWidth;
+        sym.layerBorderColor = resolved.colorGroup.layerBorderColor;
+        sym.layerBorderOpacity = resolved.colorGroup.layerBorderOpacity;
         if (resolved.colorGroup.opacity !== undefined) sym.opacity = resolved.colorGroup.opacity;
       } else if (paramType === 'colorGroup') {
         sym.color = undefined; sym.background = undefined;
+        sym.backgroundOpacity = undefined; sym.borderRadius = undefined;
         sym.strokeColor = undefined; sym.strokeWidth = undefined; sym.strokeOpacity = undefined;
+        sym.layerBorderWidth = undefined; sym.layerBorderColor = undefined; sym.layerBorderOpacity = undefined;
       }
     }
     return true;
