@@ -29,14 +29,27 @@ function reResolveAllFromHistory(sym: SymbolSpec) {
   if (resolved.offset) sym.offset = resolved.offset;
   if (resolved.d) sym.bounds = { w: resolved.d.x, h: resolved.d.y };
   if (resolved.colorGroup) {
-    if (resolved.colorGroup.color !== undefined) sym.color = resolved.colorGroup.color;
-    if (resolved.colorGroup.background !== undefined) sym.background = resolved.colorGroup.background;
-    if (resolved.colorGroup.backgroundOpacity !== undefined) sym.backgroundOpacity = resolved.colorGroup.backgroundOpacity;
-    if (resolved.colorGroup.borderRadius !== undefined) sym.borderRadius = resolved.colorGroup.borderRadius;
-    if (resolved.colorGroup.strokeColor !== undefined) sym.strokeColor = resolved.colorGroup.strokeColor;
-    if (resolved.colorGroup.strokeWidth !== undefined) sym.strokeWidth = resolved.colorGroup.strokeWidth;
-    if (resolved.colorGroup.strokeOpacity !== undefined) sym.strokeOpacity = resolved.colorGroup.strokeOpacity;
-    if (resolved.colorGroup.opacity !== undefined) sym.opacity = resolved.colorGroup.opacity;
+    const cg = resolved.colorGroup;
+    if (cg.color !== undefined) sym.color = cg.color;
+    if (cg.opacity !== undefined) sym.opacity = cg.opacity;
+    // Symbol border (b=) — new fields take priority, fallback to legacy
+    if (cg.symbolBorderColor !== undefined) sym.strokeColor = cg.symbolBorderColor;
+    else if (cg.strokeColor !== undefined) sym.strokeColor = cg.strokeColor;
+    if (cg.symbolBorderWidth !== undefined) sym.strokeWidth = cg.symbolBorderWidth;
+    else if (cg.strokeWidth !== undefined) sym.strokeWidth = cg.strokeWidth;
+    if (cg.symbolBorderOpacity !== undefined) sym.strokeOpacity = cg.symbolBorderOpacity;
+    else if (cg.strokeOpacity !== undefined) sym.strokeOpacity = cg.strokeOpacity;
+    // Layer background (bc=)
+    if (cg.layerBackground !== undefined) sym.background = cg.layerBackground;
+    else if (cg.background !== undefined) sym.background = cg.background;
+    if (cg.layerBackgroundOpacity !== undefined) sym.backgroundOpacity = cg.layerBackgroundOpacity;
+    else if (cg.backgroundOpacity !== undefined) sym.backgroundOpacity = cg.backgroundOpacity;
+    if (cg.layerBorderRadius !== undefined) sym.borderRadius = cg.layerBorderRadius;
+    else if (cg.borderRadius !== undefined) sym.borderRadius = cg.borderRadius;
+    // Layer border (bb=)
+    if (cg.layerBorderWidth !== undefined) sym.layerBorderWidth = cg.layerBorderWidth;
+    if (cg.layerBorderColor !== undefined) sym.layerBorderColor = cg.layerBorderColor;
+    if (cg.layerBorderOpacity !== undefined) sym.layerBorderOpacity = cg.layerBorderOpacity;
   }
 }
 import { Move, RotateCw, Maximize2, Diamond, Hexagon, Undo2 } from 'lucide-react';
