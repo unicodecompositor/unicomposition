@@ -31,6 +31,8 @@ function reResolveAllFromHistory(sym: SymbolSpec) {
   if (resolved.colorGroup) {
     if (resolved.colorGroup.color !== undefined) sym.color = resolved.colorGroup.color;
     if (resolved.colorGroup.background !== undefined) sym.background = resolved.colorGroup.background;
+    if (resolved.colorGroup.backgroundOpacity !== undefined) sym.backgroundOpacity = resolved.colorGroup.backgroundOpacity;
+    if (resolved.colorGroup.borderRadius !== undefined) sym.borderRadius = resolved.colorGroup.borderRadius;
     if (resolved.colorGroup.strokeColor !== undefined) sym.strokeColor = resolved.colorGroup.strokeColor;
     if (resolved.colorGroup.strokeWidth !== undefined) sym.strokeWidth = resolved.colorGroup.strokeWidth;
     if (resolved.colorGroup.strokeOpacity !== undefined) sym.strokeOpacity = resolved.colorGroup.strokeOpacity;
@@ -202,18 +204,21 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
 
     if (paramType === 'offset') {
       // For move undo: get current offset, undo, compute reverse delta, apply to positions
-      // Also restore grid size by removing expandLeft/expandTop
+      // Also restore grid size by removing me= (move expand)
       selectionSet.forEach(idx => {
         const sym = newSpec.symbols[idx];
         if (!sym) return;
         
-        // Find the last history step with offset to get expandLeft/expandTop
+        // Find the last history step with offset to get me= expand info
         let expandLeft = 0, expandTop = 0;
         if (sym.history) {
           for (let i = sym.history.length - 1; i >= 0; i--) {
             if (sym.history[i].offset) {
-              expandLeft = (sym.history[i].offset as any).expandLeft || 0;
-              expandTop = (sym.history[i].offset as any).expandTop || 0;
+              const me = sym.history[i].me;
+              if (me) {
+                expandLeft = me.el || 0;
+                expandTop = me.et || 0;
+              }
               break;
             }
           }
@@ -236,9 +241,8 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
           // Shrink grid by expandLeft/expandTop and shift all layers back
           if (expandLeft > 0 || expandTop > 0) {
             const oldW = newSpec.gridWidth;
-            const oldH = newSpec.gridHeight;
             const newW = Math.max(2, oldW - expandLeft);
-            const newH = Math.max(2, oldH - expandTop);
+            const newH = Math.max(2, newSpec.gridHeight - expandTop);
             
             newSpec.symbols = newSpec.symbols.map(s => {
               const r = getRect(s.start, s.end, oldW);
@@ -414,9 +418,9 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
         const totalDx = newRect.x1 - origRect.x1;
         const totalDy = newRect.y1 - origRect.y1;
         
-        // Store grid expansion info in offset history (for undo)
-        const totalExpandLeft = finalW - initialSpec.gridWidth - (totalDx >= 0 ? totalDx : 0);
-        const totalExpandTop = finalH - initialSpec.gridHeight - (totalDy >= 0 ? totalDy : 0);
+        // Store grid expansion info as me= (move expand) for undo
+        const totalExpandLeft = Math.max(0, finalW - initialSpec.gridWidth - (totalDx >= 0 ? totalDx : 0));
+        const totalExpandTop = Math.max(0, finalH - initialSpec.gridHeight - (totalDy >= 0 ? totalDy : 0));
         
         if (!sym.history) sym.history = [];
         const origHistory = origSym?.history ? JSON.parse(JSON.stringify(origSym.history)) : [];
@@ -426,19 +430,17 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
         const step: any = { index: nextIndex };
         
         if (nextIndex === 0) {
-          step.offset = { op: '=', x: totalDx, y: totalDy, expandLeft: Math.max(0, totalExpandLeft), expandTop: Math.max(0, totalExpandTop) };
+          step.offset = { op: '=', x: totalDx, y: totalDy };
           sym.offset = { x: totalDx, y: totalDy };
         } else {
           const resolved = resolveHistory(sym.history);
           const prevOffset = resolved.offset || { x: 0, y: 0 };
-          step.offset = { 
-            op: '+=', 
-            x: totalDx - prevOffset.x, 
-            y: totalDy - prevOffset.y,
-            expandLeft: Math.max(0, totalExpandLeft),
-            expandTop: Math.max(0, totalExpandTop)
-          };
+          step.offset = { op: '+=', x: totalDx - prevOffset.x, y: totalDy - prevOffset.y };
           sym.offset = { x: totalDx, y: totalDy };
+        }
+        // Attach me= (move expand) if grid was expanded
+        if (totalExpandLeft > 0 || totalExpandTop > 0) {
+          step.me = { el: totalExpandLeft, et: totalExpandTop };
         }
         sym.history.push(step);
       });
@@ -679,8 +681,27 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
     canvas.style.height = `${canvasHeight}px`;
     ctx.scale(dpr, dpr);
 
-    ctx.fillStyle = 'hsl(220, 18%, 10%)';
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    // Grid-level background
+    if (spec?.background) {
+      ctx.save();
+      ctx.globalAlpha = spec.backgroundOpacity ?? spec.opacity ?? 1;
+      ctx.fillStyle = spec.background;
+      if (spec.borderRadius) {
+        const brStr = spec.borderRadius;
+        const shortSide = Math.min(canvasWidth, canvasHeight);
+        let radiusPx = brStr.endsWith('%') ? shortSide * parseFloat(brStr) / 100 : parseFloat(brStr) * cellSize;
+        radiusPx = Math.min(Math.max(0, radiusPx), shortSide / 2);
+        ctx.beginPath();
+        ctx.roundRect(0, 0, canvasWidth, canvasHeight, radiusPx);
+        ctx.fill();
+      } else {
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+      }
+      ctx.restore();
+    } else {
+      ctx.fillStyle = 'hsl(220, 18%, 10%)';
+      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    }
 
     if (showGrid) {
       ctx.strokeStyle = 'hsl(220, 15%, 25%)';
@@ -724,8 +745,37 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
 
         // Draw background fill (b=) behind the glyph area
         if (symbol.background) {
+          ctx.save();
+          const bgOpacity = symbol.backgroundOpacity ?? 1;
+          ctx.globalAlpha = bgOpacity;
           ctx.fillStyle = symbol.background;
-          ctx.fillRect(x1, y1, sw, sh);
+          
+          if (symbol.borderRadius) {
+            const brStr = symbol.borderRadius;
+            let radiusPx: number;
+            const shortSide = Math.min(sw, sh);
+            
+            if (brStr.endsWith('%')) {
+              // Percentage: relative to shortest side, 50% = full pill
+              const pct = parseFloat(brStr) / 100;
+              radiusPx = shortSide * pct;
+            } else {
+              // Pixel value
+              radiusPx = parseFloat(brStr);
+            }
+            
+            // Clamp to half of shortest side
+            radiusPx = Math.min(radiusPx, shortSide / 2);
+            radiusPx = Math.max(0, radiusPx);
+            
+            // Draw rounded rect
+            ctx.beginPath();
+            ctx.roundRect(x1, y1, sw, sh, radiusPx);
+            ctx.fill();
+          } else {
+            ctx.fillRect(x1, y1, sw, sh);
+          }
+          ctx.restore();
         }
 
         const hasSt = symbol.st && Math.abs(symbol.st.force) > 0;
@@ -763,7 +813,7 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
           padCtx.drawImage(input, padPx, padPx);
           const result = transformer.render(padCanvas, {
             mode: 3, strokeWidth: strokePx, strokeColor: strokeRgb, strokeOpacity: strokeOp,
-          });
+          }, null, null, 1);
           const padFrac = padPx / input.width * drawW;
           const padFracY = padPx / input.height * drawH;
           ctx.drawImage(result, drawX - padFrac, drawY - padFracY, drawW + padFrac * 2, drawH + padFracY * 2);
@@ -780,15 +830,13 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
 
           let gpuInput: HTMLCanvasElement = srcCanvas;
           const gpuExpand = DEFAULT_GPU_EXPAND_FACTOR;
-          const ox = sw * (gpuExpand - 1) / 2;
-          const oy = sh * (gpuExpand - 1) / 2;
 
           // Apply trapezoid (st) via GPU — mode 0 (no stroke — applied separately after)
           if (hasSt) {
             const stResult = transformer.render(gpuInput, {
               mode: 0, angle: symbol.st!.angle, force: symbol.st!.force, offset: 0, scale: 1.0,
               expandViewport: true, expandFactor: gpuExpand,
-            });
+            }, null, null, 1);
 
             if (hasSp) {
               const copy = document.createElement('canvas');
@@ -803,9 +851,21 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
                 deformedCopy.width = stResult.width; deformedCopy.height = stResult.height;
                 const dcCtx = deformedCopy.getContext('2d');
                 if (dcCtx) dcCtx.drawImage(stResult, 0, 0);
-                applyStroke(deformedCopy, x1 - ox, y1 - oy, sw * gpuExpand, sh * gpuExpand);
+                applyStroke(
+                  deformedCopy,
+                  x1 - (deformedCopy.width - sw) / 2,
+                  y1 - (deformedCopy.height - sh) / 2,
+                  deformedCopy.width,
+                  deformedCopy.height,
+                );
               } else {
-                ctx.drawImage(stResult, x1 - ox, y1 - oy, sw * gpuExpand, sh * gpuExpand);
+                ctx.drawImage(
+                  stResult,
+                  x1 - (stResult.width - sw) / 2,
+                  y1 - (stResult.height - sh) / 2,
+                  stResult.width,
+                  stResult.height,
+                );
               }
               return;
             }
@@ -815,16 +875,28 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
             const spResult = transformer.render(gpuInput, {
               mode: 1, angle: symbol.sp!.angle, force: symbol.sp!.force, offset: 0, scale: 1.0,
               expandViewport: !hasSt, expandFactor: gpuExpand,
-            });
+            }, null, null, 1);
             // Apply stroke as separate pass on deformed result
             if (hasStroke) {
               const deformedCopy = document.createElement('canvas');
               deformedCopy.width = spResult.width; deformedCopy.height = spResult.height;
               const dcCtx = deformedCopy.getContext('2d');
               if (dcCtx) dcCtx.drawImage(spResult, 0, 0);
-              applyStroke(deformedCopy, x1 - ox, y1 - oy, sw * gpuExpand, sh * gpuExpand);
+              applyStroke(
+                deformedCopy,
+                x1 - (deformedCopy.width - sw) / 2,
+                y1 - (deformedCopy.height - sh) / 2,
+                deformedCopy.width,
+                deformedCopy.height,
+              );
             } else {
-              ctx.drawImage(spResult, x1 - ox, y1 - oy, sw * gpuExpand, sh * gpuExpand);
+              ctx.drawImage(
+                spResult,
+                x1 - (spResult.width - sw) / 2,
+                y1 - (spResult.height - sh) / 2,
+                spResult.width,
+                spResult.height,
+              );
             }
           }
         } else if (hasStroke) {
@@ -841,6 +913,27 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
         }
       });
 
+      // Grid-level border (drawn inset by half border width)
+      if (spec.strokeWidth && spec.strokeWidth > 0 && spec.strokeColor) {
+        ctx.save();
+        const borderPx = Math.max(1, spec.strokeWidth * cellSize);
+        ctx.globalAlpha = spec.strokeOpacity ?? 1;
+        ctx.strokeStyle = spec.strokeColor;
+        ctx.lineWidth = borderPx;
+        const halfBorder = borderPx / 2;
+        if (spec.borderRadius) {
+          const brStr = spec.borderRadius;
+          const shortSide = Math.min(canvasWidth, canvasHeight);
+          let radiusPx = brStr.endsWith('%') ? shortSide * parseFloat(brStr) / 100 : parseFloat(brStr) * cellSize;
+          radiusPx = Math.min(Math.max(0, radiusPx), shortSide / 2);
+          ctx.beginPath();
+          ctx.roundRect(halfBorder, halfBorder, canvasWidth - borderPx, canvasHeight - borderPx, Math.max(0, radiusPx - halfBorder));
+          ctx.stroke();
+        } else {
+          ctx.strokeRect(halfBorder, halfBorder, canvasWidth - borderPx, canvasHeight - borderPx);
+        }
+        ctx.restore();
+      }
 
       // Draw selection/lock overlays on top
       spec.symbols.forEach((symbol, idx) => {
@@ -941,6 +1034,8 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
               color={spec?.symbols[selectionSet[0]]?.color}
               opacity={spec?.symbols[selectionSet[0]]?.opacity}
               background={spec?.symbols[selectionSet[0]]?.background}
+              backgroundOpacity={spec?.symbols[selectionSet[0]]?.backgroundOpacity}
+              borderRadius={spec?.symbols[selectionSet[0]]?.borderRadius}
               strokeWidth={spec?.symbols[selectionSet[0]]?.strokeWidth}
               strokeColor={spec?.symbols[selectionSet[0]]?.strokeColor}
               strokeOpacity={spec?.symbols[selectionSet[0]]?.strokeOpacity}
@@ -957,6 +1052,8 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
                         color,
                         opacity,
                         background: newSpec.symbols[idx].background,
+                        backgroundOpacity: newSpec.symbols[idx].backgroundOpacity,
+                        borderRadius: newSpec.symbols[idx].borderRadius,
                         strokeColor: newSpec.symbols[idx].strokeColor,
                         strokeWidth: newSpec.symbols[idx].strokeWidth,
                         strokeOpacity: newSpec.symbols[idx].strokeOpacity,
@@ -966,18 +1063,22 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
                 });
                 onUpdateCode(stringifySpec(newSpec), isFinal);
               }}
-              onBackgroundChange={(bg, isFinal) => {
+              onBackgroundChange={(bg, bgOpacity, br, isFinal) => {
                 if (!spec || !onUpdateCode) return;
                 const newSpec = JSON.parse(JSON.stringify(spec));
                 selectionSet.forEach(idx => {
                   if (newSpec.symbols[idx]) {
                     newSpec.symbols[idx].background = bg;
+                    newSpec.symbols[idx].backgroundOpacity = bgOpacity;
+                    newSpec.symbols[idx].borderRadius = br || undefined;
                     if (isFinal) {
                       appendTransformToHistory(newSpec.symbols[idx], 'colorGroup', {
                         op: '=',
                         color: newSpec.symbols[idx].color,
                         opacity: newSpec.symbols[idx].opacity,
                         background: bg,
+                        backgroundOpacity: bgOpacity,
+                        borderRadius: br || undefined,
                         strokeColor: newSpec.symbols[idx].strokeColor,
                         strokeWidth: newSpec.symbols[idx].strokeWidth,
                         strokeOpacity: newSpec.symbols[idx].strokeOpacity,
@@ -1001,6 +1102,8 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
                         color: newSpec.symbols[idx].color,
                         opacity: newSpec.symbols[idx].opacity,
                         background: newSpec.symbols[idx].background,
+                        backgroundOpacity: newSpec.symbols[idx].backgroundOpacity,
+                        borderRadius: newSpec.symbols[idx].borderRadius,
                         strokeColor: color,
                         strokeWidth: width,
                         strokeOpacity: opacity,
