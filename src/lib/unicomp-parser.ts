@@ -600,6 +600,10 @@ export function transformGroupScale(
   const targetW = newEndX - newStartX;
   const targetH = newEndY - newStartY;
 
+  // Определяем, произошло ли зеркалирование группы (конец пересёк якорь начала)
+  const groupFlipH = targetW < 0;
+  const groupFlipV = targetH < 0;
+
   // Собираем новые XY для всех символов
   type SymXY = { sx: number; sy: number; ex: number; ey: number };
   const symXYs: SymXY[] = newSpec.symbols.map((sym, i) => {
@@ -608,11 +612,18 @@ export function transformGroupScale(
     const e = indexToXY(d.end, gridWidth);
     if (!indices.includes(i)) return { sx: s.x, sy: s.y, ex: e.x, ey: e.y };
     // Пропорциональное масштабирование
-    const sx = newStartX + Math.round((s.x - origMinX) / origW * targetW);
-    const sy = newStartY + Math.round((s.y - origMinY) / origH * targetH);
-    const ex = newStartX + Math.round((e.x - origMinX) / origW * targetW);
-    const ey = newStartY + Math.round((e.y - origMinY) / origH * targetH);
-    return { sx, sy, ex, ey };
+    const rawSX = newStartX + Math.round((s.x - origMinX) / origW * targetW);
+    const rawSY = newStartY + Math.round((s.y - origMinY) / origH * targetH);
+    const rawEX = newStartX + Math.round((e.x - origMinX) / origW * targetW);
+    const rawEY = newStartY + Math.round((e.y - origMinY) / origH * targetH);
+    // Канонический порядок: start всегда top-left, end всегда bottom-right.
+    // Это гарантирует, что getRect никогда не вернёт отрицательные width/height.
+    return {
+      sx: Math.min(rawSX, rawEX),
+      sy: Math.min(rawSY, rawEY),
+      ex: Math.max(rawSX, rawEX),
+      ey: Math.max(rawSY, rawEY),
+    };
   });
 
   // Ghost Grid pg XY
@@ -661,6 +672,36 @@ export function transformGroupScale(
   newSpec.gridHeight = newHeight;
   newSpec.gridSize = newWidth;
   newSpec.grid.g = { x: newWidth, y: newHeight };
+
+  // Применяем flip к выделенным символам при пересечении якоря
+  // (end пересёк start → зеркалирование Symbol/Figure по соответствующей оси)
+  if (groupFlipH || groupFlipV) {
+    for (const idx of indices) {
+      const sym = newSpec.symbols[idx];
+      const origSym = spec.symbols[idx];
+      if (!sym || !origSym) continue;
+
+      const origF = origSym.f;
+      const hadH = origF === 'h' || origF === 'hv';
+      const hadV = origF === 'v' || origF === 'hv';
+      const newH = groupFlipH ? !hadH : hadH;
+      const newV = groupFlipV ? !hadV : hadV;
+
+      if (newH && newV) {
+        sym.f = 'hv';
+        sym.flip = 'hv';
+      } else if (newH) {
+        sym.f = 'h';
+        sym.flip = 'h';
+      } else if (newV) {
+        sym.f = 'v';
+        sym.flip = 'v';
+      } else {
+        sym.f = undefined;
+        sym.flip = undefined;
+      }
+    }
+  }
 
   // Записываем историю для масштабированных слоёв
   for (const idx of indices) {
