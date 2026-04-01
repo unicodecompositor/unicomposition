@@ -850,13 +850,15 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
                   const sym = newSpec.symbols[idx];
                   if (!sym) return;
                   sym.background = data.background;
-                  sym.b = data.background || undefined;
                   sym.backgroundOpacity = data.backgroundOpacity;
                   sym.borderRadius = data.borderRadius || undefined;
                   sym.layerBorderWidth = data.layerBorderWidth;
                   sym.layerBorderColor = data.layerBorderColor;
-                  sym.bc = data.layerBorderColor || undefined;
                   sym.layerBorderOpacity = data.layerBorderOpacity;
+                  // clear old incorrect aliases so stringifySpec uses the right params
+                  sym.b = undefined;
+                  sym.bc = undefined;
+                  sym.bb = undefined;
                   if (isFinal) {
                     appendTransformToHistory(sym, 'colorGroup', {
                       op: '=',

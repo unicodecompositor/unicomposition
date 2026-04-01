@@ -1326,13 +1326,64 @@ class Parser {
 }
 
 function bridgeSymbolShadowFields(sym: SymbolSpec): void {
-  if (sym.c && !sym.color) sym.color = sym.c;
-  if (sym.b && !sym.background) sym.background = sym.b;
-  if (sym.bc && !sym.layerBorderColor) sym.layerBorderColor = sym.bc;
-  if (sym.bb !== undefined && sym.layerBorderWidth === undefined) {
-    const n = parseFloat(sym.bb as string);
-    if (!isNaN(n)) sym.layerBorderWidth = n;
+  // c= = Symbol Color: color[/opacity]
+  if (sym.c && !sym.color) {
+    const cStr = String(sym.c);
+    const lastSlash = cStr.lastIndexOf('/');
+    if (lastSlash > 0) {
+      const opStr = cStr.substring(lastSlash + 1).trim();
+      const op = parseFloat(opStr);
+      if (!isNaN(op) && op >= 0 && op <= 1 && opStr !== '') {
+        sym.color = cStr.substring(0, lastSlash);
+        if (sym.opacity === undefined) sym.opacity = op;
+      } else {
+        sym.color = cStr;
+      }
+    } else {
+      sym.color = cStr;
+    }
   }
+
+  // b= = Symbol Border: color/width[/opacity]
+  if (sym.b && !sym.strokeColor) {
+    const parts = String(sym.b).split('/');
+    if (parts.length >= 2) {
+      sym.strokeColor = parts[0];
+      const w = parseFloat(parts[1]);
+      if (!isNaN(w)) sym.strokeWidth = w;
+      if (parts[2] !== undefined) {
+        const op = parseFloat(parts[2]);
+        if (!isNaN(op)) sym.strokeOpacity = op;
+      }
+    } else {
+      // backward compat: single value was used as background color
+      if (!sym.background) sym.background = String(sym.b);
+    }
+  }
+
+  // bc= = Layer Background: color[/opacity[/radius]]
+  if (sym.bc && !sym.background) {
+    const parts = String(sym.bc).split('/');
+    sym.background = parts[0];
+    if (parts[1] !== undefined) {
+      const op = parseFloat(parts[1]);
+      if (!isNaN(op) && sym.backgroundOpacity === undefined) sym.backgroundOpacity = op;
+    }
+    if (parts[2] !== undefined && !sym.borderRadius) sym.borderRadius = parts[2];
+  }
+
+  // bb= = Layer Border: width[/color[/opacity]]
+  if (sym.bb !== undefined && sym.layerBorderWidth === undefined) {
+    const parts = String(sym.bb).split('/');
+    const n = parseFloat(parts[0]);
+    if (!isNaN(n)) sym.layerBorderWidth = n;
+    if (parts[1] !== undefined && !sym.layerBorderColor) sym.layerBorderColor = parts[1];
+    if (parts[2] !== undefined && sym.layerBorderOpacity === undefined) {
+      const op = parseFloat(parts[2]);
+      if (!isNaN(op)) sym.layerBorderOpacity = op;
+    }
+  }
+
   if (sym.f && !sym.flip) sym.flip = sym.f;
   if (sym.r !== undefined && sym.rotate === undefined) sym.rotate = sym.r;
 }
@@ -1467,14 +1518,36 @@ export function stringifySpec(spec: UniCompSpec, mode: 'editor' | 'export' = 'ed
     if (flipVal) params.push(`f=${flipVal}`);
     const rotateVal = sym.rotate !== undefined ? sym.rotate : sym.r;
     if (rotateVal !== undefined && !sym.keyframes) params.push(`r=${rotateVal}`);
+    // c= Symbol Color: color[/opacity]
     const colorVal = sym.color ?? sym.c;
-    if (colorVal) params.push(`c=${colorVal}`);
-    const bgVal = sym.background ?? sym.b;
-    if (bgVal) params.push(`b=${bgVal}`);
-    const bcVal = sym.layerBorderColor ?? sym.bc;
-    if (bcVal) params.push(`bc=${bcVal}`);
-    const bbVal = sym.layerBorderWidth !== undefined ? String(sym.layerBorderWidth) : sym.bb;
-    if (bbVal) params.push(`bb=${bbVal}`);
+    if (colorVal) {
+      let cStr = String(colorVal);
+      if (sym.opacity !== undefined && sym.opacity !== 1) cStr += `/${sym.opacity}`;
+      params.push(`c=${cStr}`);
+    }
+    // b= Symbol Border: color/width[/opacity]
+    if (sym.strokeWidth && sym.strokeWidth > 0 && sym.strokeColor) {
+      let bStr = `${sym.strokeColor}/${sym.strokeWidth}`;
+      if (sym.strokeOpacity !== undefined && sym.strokeOpacity !== 1) bStr += `/${sym.strokeOpacity}`;
+      params.push(`b=${bStr}`);
+    }
+    // bc= Layer Background: color[/opacity[/radius]]
+    const bgVal = sym.background ?? (sym.b && String(sym.b).split('/').length === 1 ? sym.b : undefined);
+    if (bgVal) {
+      let bcStr = String(bgVal);
+      if (sym.backgroundOpacity !== undefined && sym.backgroundOpacity !== 1) bcStr += `/${sym.backgroundOpacity}`;
+      if (sym.borderRadius) bcStr += `/${sym.borderRadius}`;
+      params.push(`bc=${bcStr}`);
+    }
+    // bb= Layer Border: width[/color[/opacity]]
+    const bbWidth = sym.layerBorderWidth ?? (sym.bb !== undefined ? parseFloat(String(sym.bb)) : undefined);
+    if (bbWidth !== undefined && bbWidth > 0) {
+      let bbStr = String(bbWidth);
+      const bbColor = sym.layerBorderColor;
+      if (bbColor) bbStr += `/${bbColor}`;
+      if (sym.layerBorderOpacity !== undefined && sym.layerBorderOpacity !== 1) bbStr += `/${sym.layerBorderOpacity}`;
+      params.push(`bb=${bbStr}`);
+    }
     if (sym.m) params.push(`m=${sym.m.x},${sym.m.y},${sym.m.z},${sym.m.w}`);
     if (sym.sp) params.push(`sp=${sym.sp.angle},${sym.sp.force}`);
     if (sym.w) params.push(`w=${sym.w.angle},${sym.w.force}`);
