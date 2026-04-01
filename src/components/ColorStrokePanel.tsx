@@ -257,6 +257,7 @@ export const ColorStrokePanel: React.FC<ColorStrokePanelProps> = ({
   const [symBorderAlpha, setSymBorderAlpha] = useState(strokeOpacity);
 
   // Layer background state (bc=)
+  const [bgEnabled, setBgEnabled] = useState(!!background);
   const [layerBgHsl, setLayerBgHsl] = useState<[number, number, number]>(() => parseHsl(background));
   const [layerBgAlpha, setLayerBgAlpha] = useState(backgroundOpacity);
   const [layerRadius, setLayerRadius] = useState(borderRadius);
@@ -268,7 +269,7 @@ export const ColorStrokePanel: React.FC<ColorStrokePanelProps> = ({
   // Sync from props
   useEffect(() => { setSymHsl(parseHsl(color)); setSymAlpha(opacity); }, [color, opacity]);
   useEffect(() => { setSymBorderHsl(parseHsl(strokeColor)); setSymBorderW(strokeWidth); setSymBorderAlpha(strokeOpacity); }, [strokeColor, strokeWidth, strokeOpacity]);
-  useEffect(() => { setLayerBgHsl(parseHsl(background)); setLayerBgAlpha(backgroundOpacity); setLayerRadius(borderRadius); }, [background, backgroundOpacity, borderRadius]);
+  useEffect(() => { setBgEnabled(!!background); setLayerBgHsl(parseHsl(background)); setLayerBgAlpha(backgroundOpacity); setLayerRadius(borderRadius); }, [background, backgroundOpacity, borderRadius]);
   useEffect(() => { setLayerBorderHsl(parseHsl(layerBorderColor)); setLayerBorderW(layerBorderWidth); setLayerBorderAlphaState(layerBorderOpacity); }, [layerBorderColor, layerBorderWidth, layerBorderOpacity]);
 
   const panelRef = useRef<HTMLDivElement>(null);
@@ -299,17 +300,18 @@ export const ColorStrokePanel: React.FC<ColorStrokePanelProps> = ({
   const emitLayer = useCallback((
     bgHsl: [number, number, number], bgAlpha: number, radius: string,
     bbHsl: [number, number, number], bbW: number, bbAlpha: number,
-    isFinal: boolean
+    isFinal: boolean,
+    bgOn: boolean = bgEnabled,
   ) => {
     onLayerChange({
-      background: hslToString(...bgHsl),
+      background: bgOn ? hslToString(...bgHsl) : '',
       backgroundOpacity: bgAlpha,
       borderRadius: radius,
       layerBorderWidth: bbW,
       layerBorderColor: hslToString(...bbHsl),
       layerBorderOpacity: bbAlpha,
     }, isFinal);
-  }, [onLayerChange]);
+  }, [onLayerChange, bgEnabled]);
 
   const currentSymColor = hslToString(...symHsl);
   const currentSymBorderColor = hslToString(...symBorderHsl);
