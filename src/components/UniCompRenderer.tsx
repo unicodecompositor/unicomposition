@@ -61,6 +61,7 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
   const [isLongPressActive, setIsLongPressActive] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const lastUpdateRef = useRef<number>(0);
+  const lastEditCodeRef = useRef<string | null>(null);
   const initialAngleRef = useRef<number | null>(null);
   const rotationCenterRef = useRef<{ x: number, y: number } | null>(null);
   const initialCellSizeRef = useRef<number>(0);
@@ -264,9 +265,10 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
           const sym = newSpec.symbols[idx];
           if (!sym) return;
           const origSym = initialSpec.symbols[idx];
-          const baseRotate = origSym?.rotate || 0;
+          const baseRotate = (origSym?.rotate !== undefined ? origSym.rotate : origSym?.r) ?? 0;
           const newRotate = normalizeDegrees(baseRotate + snappedDelta);
           sym.rotate = newRotate;
+          sym.r = newRotate;
           appendTransformToHistory(sym, 'rotate', newRotate);
         });
       }
@@ -372,14 +374,22 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
       }
     }
 
-    onUpdateCode(stringifySpec(newSpec), false);
+    const code = stringifySpec(newSpec);
+    lastEditCodeRef.current = code;
+    onUpdateCode(code, false);
   }, [isEditing, editStartPos, initialSpec, selectionSet, selectionBounds, cellSize, onUpdateCode, isLongPressActive, angleStep]);
 
   const handleMouseUp = useCallback(() => {
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
-    if (isEditing && spec && onUpdateCode) {
-      onUpdateCode(stringifySpec(spec), true);
+    if (isEditing && onUpdateCode) {
+      const finalCode = lastEditCodeRef.current;
+      if (finalCode) {
+        onUpdateCode(finalCode, true);
+      } else if (spec) {
+        onUpdateCode(stringifySpec(spec), true);
+      }
     }
+    lastEditCodeRef.current = null;
     setIsEditing(null);
     setEditStartPos(null);
     setInitialSpec(null);
@@ -390,7 +400,7 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
     lastGestureAngleRef.current = null;
     initialBoundsRef.current = null;
     document.body.classList.remove('dragging-active');
-  }, [isEditing, spec, onUpdateCode, initialSpec]);
+  }, [isEditing, spec, onUpdateCode]);
 
   useEffect(() => {
     if (isEditing || longPressTimer.current) {
@@ -809,6 +819,7 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
                   const sym = newSpec.symbols[idx];
                   if (!sym) return;
                   sym.color = data.color;
+                  sym.c = data.color;
                   sym.opacity = data.opacity;
                   sym.strokeWidth = data.strokeWidth;
                   sym.strokeColor = data.strokeColor;
@@ -839,10 +850,12 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
                   const sym = newSpec.symbols[idx];
                   if (!sym) return;
                   sym.background = data.background;
+                  sym.b = data.background || undefined;
                   sym.backgroundOpacity = data.backgroundOpacity;
                   sym.borderRadius = data.borderRadius || undefined;
                   sym.layerBorderWidth = data.layerBorderWidth;
                   sym.layerBorderColor = data.layerBorderColor;
+                  sym.bc = data.layerBorderColor || undefined;
                   sym.layerBorderOpacity = data.layerBorderOpacity;
                   if (isFinal) {
                     appendTransformToHistory(sym, 'colorGroup', {

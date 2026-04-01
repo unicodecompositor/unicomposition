@@ -890,26 +890,27 @@ export function undoLastHistoryParam(
     if (hasParam) {
       sym.history.splice(i, 1);
       const resolved = resolveHistory(sym.history);
-      if (resolved.st) sym.st = resolved.st;
-      if (resolved.sp) sym.sp = resolved.sp;
-      if (resolved.w) sym.w = resolved.w;
-      if (resolved.rotate !== undefined) sym.rotate = resolved.rotate;
+      if (resolved.st) sym.st = resolved.st; else sym.st = undefined;
+      if (resolved.sp) sym.sp = resolved.sp; else sym.sp = undefined;
+      if (resolved.w) sym.w = resolved.w; else sym.w = undefined;
+      if (resolved.rotate !== undefined) { sym.rotate = resolved.rotate; sym.r = resolved.rotate; }
+      else { sym.rotate = undefined; sym.r = undefined; }
       if (resolved.scale) sym.scale = resolved.scale;
       if (resolved.offset) sym.offset = resolved.offset;
       if (resolved.po) sym.po = resolved.po;
       if (resolved.d) sym.d = resolved.d;
       if (resolved.colorGroup) {
         const cg = resolved.colorGroup;
-        if (cg.color !== undefined) sym.color = cg.color;
+        if (cg.color !== undefined) { sym.color = cg.color; sym.c = cg.color; }
         if (cg.opacity !== undefined) sym.opacity = cg.opacity;
         if (cg.symbolBorderColor !== undefined) sym.strokeColor = cg.symbolBorderColor;
         if (cg.symbolBorderWidth !== undefined) sym.strokeWidth = cg.symbolBorderWidth;
         if (cg.symbolBorderOpacity !== undefined) sym.strokeOpacity = cg.symbolBorderOpacity;
-        if (cg.background !== undefined) sym.background = cg.background;
+        if (cg.background !== undefined) { sym.background = cg.background; sym.b = cg.background; }
         if (cg.backgroundOpacity !== undefined) sym.backgroundOpacity = cg.backgroundOpacity;
         if (cg.borderRadius !== undefined) sym.borderRadius = cg.borderRadius;
         if (cg.layerBorderWidth !== undefined) sym.layerBorderWidth = cg.layerBorderWidth;
-        if (cg.layerBorderColor !== undefined) sym.layerBorderColor = cg.layerBorderColor;
+        if (cg.layerBorderColor !== undefined) { sym.layerBorderColor = cg.layerBorderColor; sym.bc = cg.layerBorderColor; }
         if (cg.layerBorderOpacity !== undefined) sym.layerBorderOpacity = cg.layerBorderOpacity;
       }
       return true;
@@ -1324,6 +1325,33 @@ class Parser {
   }
 }
 
+function bridgeSymbolShadowFields(sym: SymbolSpec): void {
+  if (sym.c && !sym.color) sym.color = sym.c;
+  if (sym.b && !sym.background) sym.background = sym.b;
+  if (sym.bc && !sym.layerBorderColor) sym.layerBorderColor = sym.bc;
+  if (sym.bb !== undefined && sym.layerBorderWidth === undefined) {
+    const n = parseFloat(sym.bb as string);
+    if (!isNaN(n)) sym.layerBorderWidth = n;
+  }
+  if (sym.f && !sym.flip) sym.flip = sym.f;
+  if (sym.r !== undefined && sym.rotate === undefined) sym.rotate = sym.r;
+}
+
+function bridgeGridShadowFields(spec: UniCompSpec): void {
+  if (spec.grid.gc) {
+    const parts = spec.grid.gc.split('/');
+    if (!spec.background) spec.background = parts[0];
+    if (parts[1] !== undefined && spec.backgroundOpacity === undefined) spec.backgroundOpacity = parseFloat(parts[1]);
+    if (parts[2] !== undefined && !spec.borderRadius) spec.borderRadius = parts[2];
+  }
+  if (spec.grid.gb) {
+    const parts = spec.grid.gb.split('/');
+    if (!spec.strokeColor) spec.strokeColor = parts[0];
+    if (parts[1] !== undefined && spec.strokeWidth === undefined) spec.strokeWidth = parseFloat(parts[1]);
+    if (parts[2] !== undefined && spec.strokeOpacity === undefined) spec.strokeOpacity = parseFloat(parts[2]);
+  }
+}
+
 export function parseUniComp(input: string): ParseResult {
   try {
     const tokenizer = new Tokenizer(input);
@@ -1331,6 +1359,8 @@ export function parseUniComp(input: string): ParseResult {
     const parser = new Parser(tokens, input);
     const spec = parser.parse();
     spec.raw = input;
+    spec.symbols.forEach(bridgeSymbolShadowFields);
+    bridgeGridShadowFields(spec);
     return { success: true, spec };
   } catch (e) {
     return {
@@ -1379,8 +1409,26 @@ export function stringifySpec(spec: UniCompSpec, mode: 'editor' | 'export' = 'ed
   const gridParams: string[] = [];
   if (mode === 'editor' && spec.grid.pg) gridParams.push(`pg=${formatBounds(spec.grid.pg)}`);
   if (mode === 'editor' && spec.grid.po) gridParams.push(`po=${formatBounds(spec.grid.po)}`);
-  if (spec.grid.gc) gridParams.push(`gc=${spec.grid.gc}`);
-  if (spec.grid.gb) gridParams.push(`gb=${spec.grid.gb}`);
+  const gcStr = (() => {
+    if (spec.background) {
+      let s = spec.background;
+      if (spec.backgroundOpacity !== undefined && spec.backgroundOpacity !== 1) s += `/${spec.backgroundOpacity}`;
+      if (spec.borderRadius) s += `/${spec.borderRadius}`;
+      return s;
+    }
+    return spec.grid.gc;
+  })();
+  if (gcStr) gridParams.push(`gc=${gcStr}`);
+  const gbStr = (() => {
+    if (spec.strokeColor && (spec.strokeWidth ?? 0) > 0) {
+      let s = spec.strokeColor;
+      if (spec.strokeWidth !== undefined) s += `/${spec.strokeWidth}`;
+      if (spec.strokeOpacity !== undefined && spec.strokeOpacity !== 1) s += `/${spec.strokeOpacity}`;
+      return s;
+    }
+    return spec.grid.gb;
+  })();
+  if (gbStr) gridParams.push(`gb=${gbStr}`);
   if (spec.grid.id) gridParams.push(`id=${spec.grid.id}`);
   if (spec.grid.class) gridParams.push(`class=${spec.grid.class}`);
   if (spec.grid.n) gridParams.push(`n=${spec.grid.n}`);
@@ -1415,12 +1463,22 @@ export function stringifySpec(spec: UniCompSpec, mode: 'editor' | 'export' = 'ed
     if (mode === 'editor' && sym.po) params.push(`po=${formatBounds(sym.po)}`);
     if (sym.l !== undefined) params.push(`l=${sym.l}`);
     if (sym.z !== undefined) params.push(`z=${sym.z}`);
-    if (sym.f) params.push(`f=${sym.f}`);
-    if (sym.r !== undefined && !sym.keyframes) params.push(`r=${sym.r}`);
-    if (sym.c) params.push(`c=${sym.c}`);
-    if (sym.b) params.push(`b=${sym.b}`);
-    if (sym.bc) params.push(`bc=${sym.bc}`);
-    if (sym.bb) params.push(`bb=${sym.bb}`);
+    const flipVal = sym.flip ?? sym.f;
+    if (flipVal) params.push(`f=${flipVal}`);
+    const rotateVal = sym.rotate !== undefined ? sym.rotate : sym.r;
+    if (rotateVal !== undefined && !sym.keyframes) params.push(`r=${rotateVal}`);
+    const colorVal = sym.color ?? sym.c;
+    if (colorVal) params.push(`c=${colorVal}`);
+    const bgVal = sym.background ?? sym.b;
+    if (bgVal) params.push(`b=${bgVal}`);
+    const bcVal = sym.layerBorderColor ?? sym.bc;
+    if (bcVal) params.push(`bc=${bcVal}`);
+    const bbVal = sym.layerBorderWidth !== undefined ? String(sym.layerBorderWidth) : sym.bb;
+    if (bbVal) params.push(`bb=${bbVal}`);
+    if (sym.m) params.push(`m=${sym.m.x},${sym.m.y},${sym.m.z},${sym.m.w}`);
+    if (sym.sp) params.push(`sp=${sym.sp.angle},${sym.sp.force}`);
+    if (sym.w) params.push(`w=${sym.w.angle},${sym.w.force}`);
+    if (sym.st) params.push(`st=${sym.st.angle},${sym.st.force}`);
     if (sym.vp) params.push(`vp=${sym.vp.x},${sym.vp.y},${sym.vp.z}`);
     if (sym.zd) params.push(`zd=${sym.zd.x},${sym.zd.y},${sym.zd.z}`);
     if (sym.zi !== undefined) params.push(`zi=${sym.zi}`);
