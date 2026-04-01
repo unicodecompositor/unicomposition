@@ -103,10 +103,10 @@ const IndexContent: React.FC = () => {
           const fullCode = lines.join('\n');
           if (isFinal) {
             history.push(fullCode);
-            setDeferredCode(fullCode);
           } else {
             history.setLive(fullCode);
           }
+          setDeferredCode(fullCode);
           return;
         }
       }
@@ -114,10 +114,10 @@ const IndexContent: React.FC = () => {
 
     if (isFinal) {
       history.push(newRuleCode);
-      setDeferredCode(newRuleCode);
     } else {
       history.setLive(newRuleCode);
     }
+    setDeferredCode(newRuleCode);
   }, [code, multiLineResult, selectedBlockIndex, history]);
 
   const toggleSelection = useCallback((index: number) => {

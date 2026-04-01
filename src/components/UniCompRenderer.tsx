@@ -818,12 +818,14 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
                 selectionSet.forEach(idx => {
                   const sym = newSpec.symbols[idx];
                   if (!sym) return;
-                  sym.color = data.color;
-                  sym.c = data.color;
-                  sym.opacity = data.opacity;
-                  sym.strokeWidth = data.strokeWidth;
-                  sym.strokeColor = data.strokeColor;
-                  sym.strokeOpacity = data.strokeOpacity;
+                  sym.color = data.color || sym.color || '';
+                  sym.c = sym.color;
+                  sym.opacity = data.opacity ?? 1;
+                  sym.strokeWidth = data.strokeWidth ?? 0;
+                  sym.strokeColor = data.strokeColor || sym.strokeColor || '';
+                  sym.strokeOpacity = data.strokeOpacity ?? 1;
+                  // clear stale b= alias so stringifySpec uses semantic fields
+                  sym.b = undefined;
                   if (isFinal) {
                     appendTransformToHistory(sym, 'colorGroup', {
                       op: '=',
@@ -849,12 +851,12 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
                 selectionSet.forEach(idx => {
                   const sym = newSpec.symbols[idx];
                   if (!sym) return;
-                  sym.background = data.background;
-                  sym.backgroundOpacity = data.backgroundOpacity;
+                  sym.background = data.background || sym.background || '';
+                  sym.backgroundOpacity = data.backgroundOpacity ?? 1;
                   sym.borderRadius = data.borderRadius || undefined;
-                  sym.layerBorderWidth = data.layerBorderWidth;
-                  sym.layerBorderColor = data.layerBorderColor;
-                  sym.layerBorderOpacity = data.layerBorderOpacity;
+                  sym.layerBorderWidth = data.layerBorderWidth ?? 0;
+                  sym.layerBorderColor = data.layerBorderColor || sym.layerBorderColor || '';
+                  sym.layerBorderOpacity = data.layerBorderOpacity ?? 1;
                   // clear old incorrect aliases so stringifySpec uses the right params
                   sym.b = undefined;
                   sym.bc = undefined;
