@@ -920,6 +920,123 @@ export function undoLastHistoryParam(
   return false;
 }
 
+// ============================================================================
+// TEXT-BASED UNDO HELPERS
+// Scan [...]  blocks right-to-left in the raw code and remove the rightmost
+// occurrence of the target parameter key(s) from the relevant symbol(s).
+// ============================================================================
+
+function _splitBySemicolonTopLevel(text: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let depth = 0;
+  let inQuote = false;
+  let quoteChar = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuote) {
+      current += ch;
+      if (ch === quoteChar) inQuote = false;
+    } else if (ch === '"' || ch === "'") {
+      inQuote = true; quoteChar = ch; current += ch;
+    } else if (ch === '[') { depth++; current += ch; }
+    else if (ch === ']') { depth--; current += ch; }
+    else if (ch === ';' && depth === 0) { parts.push(current); current = ''; }
+    else { current += ch; }
+  }
+  parts.push(current);
+  return parts;
+}
+
+function _removeParamFromSymbolText(symbolText: string, paramKeys: string[]): string {
+  const brackets: { start: number; end: number }[] = [];
+  let i = 0;
+  while (i < symbolText.length) {
+    if (symbolText[i] === '[') {
+      let depth = 1; let j = i + 1;
+      while (j < symbolText.length && depth > 0) {
+        if (symbolText[j] === '[') depth++;
+        else if (symbolText[j] === ']') depth--;
+        j++;
+      }
+      brackets.push({ start: i, end: j });
+      i = j;
+    } else { i++; }
+  }
+  for (let b = brackets.length - 1; b >= 0; b--) {
+    const { start, end } = brackets[b];
+    const content = symbolText.slice(start + 1, end - 1);
+    const params = _splitBySemicolonTopLevel(content).filter(p => p.trim().length > 0);
+    const matchIdx: number[] = [];
+    params.forEach((p, pi) => {
+      const key = p.split('=')[0].trim();
+      if (paramKeys.includes(key)) matchIdx.push(pi);
+    });
+    if (matchIdx.length === 0) continue;
+    const remaining = params.filter((_, pi) => !matchIdx.includes(pi));
+    if (remaining.length === 0) {
+      return symbolText.slice(0, start) + symbolText.slice(end);
+    } else {
+      return symbolText.slice(0, start) + '[' + remaining.join(';') + ']' + symbolText.slice(end);
+    }
+  }
+  return symbolText;
+}
+
+export function undoParamFromCode(
+  code: string,
+  symbolIndices: number[],
+  paramKeys: string[],
+): string {
+  const colonIdx = code.indexOf(':');
+  if (colonIdx === -1) return code;
+  const prefix = code.slice(0, colonIdx + 1);
+  const symbolsText = code.slice(colonIdx + 1);
+  const symbols = _splitBySemicolonTopLevel(symbolsText);
+  let changed = false;
+  for (const idx of symbolIndices) {
+    if (idx < 0 || idx >= symbols.length) continue;
+    const modified = _removeParamFromSymbolText(symbols[idx], paramKeys);
+    if (modified !== symbols[idx]) { symbols[idx] = modified; changed = true; }
+  }
+  if (!changed) return code;
+  return prefix + symbols.join(';');
+}
+
+export function hasParamInCode(
+  code: string,
+  symbolIndices: number[],
+  paramKeys: string[],
+): boolean {
+  const colonIdx = code.indexOf(':');
+  if (colonIdx === -1) return false;
+  const symbolsText = code.slice(colonIdx + 1);
+  const symbols = _splitBySemicolonTopLevel(symbolsText);
+  for (const idx of symbolIndices) {
+    if (idx < 0 || idx >= symbols.length) continue;
+    const symbolText = symbols[idx];
+    let i = 0;
+    while (i < symbolText.length) {
+      if (symbolText[i] === '[') {
+        let depth = 1; let j = i + 1;
+        while (j < symbolText.length && depth > 0) {
+          if (symbolText[j] === '[') depth++;
+          else if (symbolText[j] === ']') depth--;
+          j++;
+        }
+        const content = symbolText.slice(i + 1, j - 1);
+        const params = _splitBySemicolonTopLevel(content).filter(p => p.trim().length > 0);
+        for (const p of params) {
+          const key = p.split('=')[0].trim();
+          if (paramKeys.includes(key)) return true;
+        }
+        i = j;
+      } else { i++; }
+    }
+  }
+  return false;
+}
+
 export function parsePlayState(str: string): PlayState {
   const trimmed = str.trim();
   

@@ -66,16 +66,18 @@ const IndexContent: React.FC = () => {
 
   const canvasContainerRef = useRef<HTMLDivElement>(null);
 
-  const { parseResult, multiLineResult, spec } = useMemo(() => {
+  const { parseResult, multiLineResult, spec, blockCode } = useMemo(() => {
     const hasMultipleLines = code.includes('\n');
     if (hasMultipleLines) {
       const multiResult = parseMultiLine(code);
       const selectedBlock = multiResult.blocks[selectedBlockIndex] || multiResult.blocks[0];
       const currentSpec = selectedBlock?.result?.success ? selectedBlock.result.spec : null;
-      return { parseResult: selectedBlock?.result || null, multiLineResult: multiResult, spec: currentSpec };
+      const lines = code.split('\n');
+      const lineCode = selectedBlock ? (lines[(selectedBlock.lineNumber ?? 1) - 1] ?? code) : code;
+      return { parseResult: selectedBlock?.result || null, multiLineResult: multiResult, spec: currentSpec, blockCode: lineCode };
     } else {
       const result = parseUniComp(code);
-      return { parseResult: result, multiLineResult: null, spec: result.success ? result.spec : null };
+      return { parseResult: result, multiLineResult: null, spec: result.success ? result.spec : null, blockCode: code };
     }
   }, [code, selectedBlockIndex]);
 
@@ -278,6 +280,7 @@ const IndexContent: React.FC = () => {
   const gridPanel = (mode: LayoutMode) => (
     <GridVisualizationPanel
       spec={spec}
+      code={blockCode}
       deferredSpec={deferredSpec}
       showGrid={showGrid}
       showIndices={showIndices}

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import { UniCompSpec, SymbolSpec, getRect, stringifySpec, resolveHistory, appendTransformToHistory, undoLastHistoryParam, indexToXY, xyToIndex, normalizeSpec, transformGroupMove, transformGroupScale } from '@/lib/unicomp-parser';
+import { UniCompSpec, SymbolSpec, getRect, stringifySpec, resolveHistory, appendTransformToHistory, undoParamFromCode, hasParamInCode, indexToXY, xyToIndex, normalizeSpec, transformGroupMove, transformGroupScale } from '@/lib/unicomp-parser';
 import { Move, RotateCw, Maximize2, Diamond, Hexagon, Circle, Undo2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { renderSpecToOffscreen, drawVertexDeformed } from '@/lib/render-utils';
@@ -8,6 +8,7 @@ import { ColorStrokePanel } from '@/components/ColorStrokePanel';
 
 interface UniCompRendererProps {
   spec: UniCompSpec | null;
+  code?: string;
   showGrid?: boolean;
   showIndices?: boolean;
   highlightedCell?: number | null;
@@ -35,6 +36,7 @@ const shortestAngleDeltaDeg = (currentRad: number, startRad: number): number => 
 
 export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
   spec,
+  code = '',
   showGrid = true,
   showIndices = false,
   highlightedCell = null,
@@ -96,91 +98,58 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
     };
   }, [selectionSet, spec, gridWidth, cellSize]);
 
-  // Подсчёт количества записей в истории геометрии (po) для выбранных слоёв
-  const geometryHistoryCount = useCallback((): number => {
-    if (!spec) return 0;
-    let maxCount = 0;
-    selectionSet.forEach(idx => {
-      const sym = spec.symbols[idx];
-      if (!sym) return;
-      if (sym.history && sym.history.length > 0) {
-        const count = sym.history.filter(step => !!step.offset).length;
-        maxCount = Math.max(maxCount, count);
-      }
-    });
-    return maxCount;
-  }, [spec, selectionSet]);
+  // Text-based helpers: check and undo params directly in the raw code string
+
+  const PARAM_KEYS: Record<string, string[]> = {
+    rotate:     ['r'],
+    sp:         ['sp'],
+    st:         ['st'],
+    w:          ['w'],
+    colorGroup: ['c', 'b', 'bc', 'bb'],
+    offset:     ['po'],
+  };
 
   const hasGeometryHistory = useCallback((): boolean => {
-    return geometryHistoryCount() > 0 || (() => {
-      if (!spec) return false;
-      return selectionSet.some(idx => {
-        const sym = spec.symbols[idx];
-        return sym && (sym.po !== undefined);
-      });
-    })();
-  }, [spec, selectionSet, geometryHistoryCount]);
+    if (!code) return selectionSet.some(idx => spec?.symbols[idx]?.po !== undefined);
+    return hasParamInCode(code, selectionSet, PARAM_KEYS.offset);
+  }, [code, spec, selectionSet]);
 
-  // Общий Undo для геометрии (move + scale)
+  // Общий Undo для геометрии (po)
   const handleUndoGeometry = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    if (!spec || !onUpdateCode) return;
-    const newSpec = JSON.parse(JSON.stringify(spec)) as UniCompSpec;
-    let changed = false;
-
-    selectionSet.forEach(idx => {
-      const sym = newSpec.symbols[idx];
-      if (sym && undoLastHistoryParam(sym, 'offset')) {
-        changed = true;
-      }
-    });
-
-    if (changed) {
-      const normalized = normalizeSpec(newSpec);
-      onUpdateCode(stringifySpec(normalized), true);
-    }
-  }, [spec, onUpdateCode, selectionSet]);
+    if (!onUpdateCode) return;
+    const currentCode = code || (spec ? stringifySpec(spec) : '');
+    if (!currentCode) return;
+    const newCode = undoParamFromCode(currentCode, selectionSet, PARAM_KEYS.offset);
+    if (newCode !== currentCode) onUpdateCode(newCode, true);
+  }, [code, spec, onUpdateCode, selectionSet]);
 
   // Отдельные Undo для трансформаций (rotate, sp, st, w, color)
   const selectionHasParam = useCallback((paramType: 'st' | 'sp' | 'w' | 'rotate' | 'colorGroup'): boolean => {
+    if (code) return hasParamInCode(code, selectionSet, PARAM_KEYS[paramType] ?? []);
     if (!spec) return false;
     return selectionSet.some(idx => {
       const sym = spec.symbols[idx];
       if (!sym) return false;
-      if (!sym.history || sym.history.length === 0) {
-        if (paramType === 'st') return !!sym.st;
-        if (paramType === 'sp') return !!sym.sp;
-        if (paramType === 'w') return !!sym.w;
-        if (paramType === 'rotate') return sym.rotate !== undefined;
-        if (paramType === 'colorGroup') return !!(sym.color || sym.background || sym.strokeColor);
-      }
-      if (sym.history && sym.history.length > 0) {
-        const base = sym.history[0];
-        if (paramType === 'st') return !!base.st;
-        if (paramType === 'sp') return !!base.sp;
-        if (paramType === 'w') return !!base.w;
-        if (paramType === 'rotate') return !!base.rotate;
-        if (paramType === 'colorGroup') return !!base.colorGroup;
-      }
+      if (paramType === 'st') return !!sym.st;
+      if (paramType === 'sp') return !!sym.sp;
+      if (paramType === 'w') return !!sym.w;
+      if (paramType === 'rotate') return sym.rotate !== undefined;
+      if (paramType === 'colorGroup') return !!(sym.color || sym.background || sym.strokeColor);
       return false;
     });
-  }, [spec, selectionSet]);
+  }, [code, spec, selectionSet]);
 
   const handleUndoTransform = useCallback((paramType: 'st' | 'sp' | 'w' | 'rotate' | 'colorGroup', e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    if (!spec || !onUpdateCode) return;
-    const newSpec = JSON.parse(JSON.stringify(spec)) as UniCompSpec;
-    let changed = false;
-
-    selectionSet.forEach(idx => {
-      const sym = newSpec.symbols[idx];
-      if (sym && undoLastHistoryParam(sym, paramType)) changed = true;
-    });
-
-    if (changed) onUpdateCode(stringifySpec(newSpec), true);
-  }, [spec, onUpdateCode, selectionSet]);
+    if (!onUpdateCode) return;
+    const currentCode = code || (spec ? stringifySpec(spec) : '');
+    if (!currentCode) return;
+    const newCode = undoParamFromCode(currentCode, selectionSet, PARAM_KEYS[paramType] ?? []);
+    if (newCode !== currentCode) onUpdateCode(newCode, true);
+  }, [code, spec, onUpdateCode, selectionSet]);
 
   const handleEditStart = (type: 'move' | 'scale' | 'rotate' | 'skew' | 'taper' | 'warp', e: React.MouseEvent | React.TouchEvent) => {
     if (e.cancelable) e.preventDefault();
@@ -1005,9 +974,9 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
                 title="Undo position/size change"
               >
                 <Undo2 className="w-3 h-3" />
-                {geometryHistoryCount() > 0 && (
+                {hasGeometryHistory() && (
                   <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold bg-primary text-primary-foreground rounded-full w-3.5 h-3.5 flex items-center justify-center">
-                    {geometryHistoryCount()}
+                    ↩
                   </span>
                 )}
               </button>

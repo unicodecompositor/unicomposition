@@ -98,6 +98,7 @@ const BackgroundGrid: React.FC<{
 // ============================================================================
 interface GridVisualizationPanelProps {
   spec: UniCompSpec | null;
+  code?: string;
   deferredSpec: UniCompSpec | null;
   showGrid: boolean;
   showIndices: boolean;
@@ -120,6 +121,7 @@ interface GridVisualizationPanelProps {
 
 export const GridVisualizationPanel: React.FC<GridVisualizationPanelProps> = ({
   spec,
+  code,
   deferredSpec,
   showGrid,
   showIndices,
@@ -344,6 +346,7 @@ export const GridVisualizationPanel: React.FC<GridVisualizationPanelProps> = ({
           <div className="relative z-10">
             <UniCompRenderer
               spec={spec}
+              code={code}
               showGrid={showGrid}
               showIndices={showIndices}
               size={containerSize}
@@ -490,6 +493,7 @@ export const GridVisualizationPanel: React.FC<GridVisualizationPanelProps> = ({
       {viewMode === 'edit' ? (
         <UniCompRenderer
           spec={spec}
+          code={code}
           showGrid={showGrid}
           showIndices={showIndices}
           size={containerSize}
