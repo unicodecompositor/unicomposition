@@ -367,7 +367,7 @@ export const SpecificationPanel: React.FC<SpecificationPanelProps> = ({
 
               return (
                 <div
-                  key={`${idx}-${symbol.char}`}
+                  key={`${idx}-${symbol.v ?? idx}`}
                   draggable
                   onDragStart={(e) => handleDragStart(e, idx)}
                   onDragOver={(e) => handleDragOver(e, idx)}
