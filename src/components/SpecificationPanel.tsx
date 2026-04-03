@@ -9,23 +9,28 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 import { Label } from '@/components/ui/label';
-import { drawSymbolSource, renderSpecToOffscreen } from '@/lib/render-utils';
+import { renderSpecToOffscreen } from '@/lib/render-utils';
 
-function getRegistry() {
-  return { resolve: (_sym: unknown) => null };
+function getSymbolDisplayChar(v: string | undefined): string {
+  const raw = v ?? '';
+  if (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2) return raw.slice(1, -1);
+  return raw;
 }
 
-/** Tiny inline canvas that renders a nested spec */
-const NestedSymbolPreview: React.FC<{ symbol: SymbolSpec; size?: number }> = ({ symbol, size = 24 }) => {
+/** Tiny inline canvas that renders a referenced #id symbol */
+const NestedSymbolPreview: React.FC<{ symbol: SymbolSpec; spec: UniCompSpec; size?: number }> = ({ symbol, spec, size = 24 }) => {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const registry = getRegistry();
-    const entry = registry.resolve(symbol);
-    if (!entry) return;
+
+    const refId = symbol.refId;
+    if (!refId) return;
+
+    const sourceSym = spec.symbols.find(s => s.id === refId);
+    if (!sourceSym) return;
 
     const dpr = window.devicePixelRatio || 1;
     canvas.width = size * dpr;
@@ -35,10 +40,37 @@ const NestedSymbolPreview: React.FC<{ symbol: SymbolSpec; size?: number }> = ({ 
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, size, size);
 
-    const offscreen = renderSpecToOffscreen(entry.spec, 64, 'hsl(210, 20%, 92%)');
-    
-    drawSymbolSource(ctx, symbol, offscreen, 0, 0, size, size);
-  }, [symbol, size]);
+    const idRect = getRect(sourceSym.start, sourceSym.end, spec.gridWidth);
+    const idW = idRect.x2 - idRect.x1 + 1;
+    const idH = idRect.y2 - idRect.y1 + 1;
+    const isoSym = {
+      ...sourceSym,
+      start: 0,
+      end: (idH - 1) * idW + (idW - 1),
+      background: undefined,
+      backgroundOpacity: undefined,
+      borderRadius: undefined,
+      layerBorderWidth: undefined,
+      layerBorderColor: undefined,
+      layerBorderOpacity: undefined,
+    };
+    const isoSpec: UniCompSpec = {
+      ...spec,
+      gridWidth: idW,
+      gridHeight: idH,
+      symbols: [isoSym as typeof sourceSym],
+      background: undefined,
+      backgroundOpacity: undefined,
+      borderRadius: undefined,
+      strokeColor: undefined,
+      strokeWidth: undefined,
+      strokeOpacity: undefined,
+      opacity: undefined,
+    };
+
+    const offscreen = renderSpecToOffscreen(isoSpec, 64, 'hsl(210, 20%, 92%)');
+    ctx.drawImage(offscreen, 0, 0, size * dpr, size * dpr);
+  }, [symbol, spec, size]);
 
   return <canvas ref={ref} className="rounded" />;
 };
@@ -374,7 +406,7 @@ export const SpecificationPanel: React.FC<SpecificationPanelProps> = ({
                           backgroundColor: color.replace(')', ', 0.2)').replace('hsl', 'hsla'),
                         }}
                       >
-                        <NestedSymbolPreview symbol={symbol} size={24} />
+                        <NestedSymbolPreview symbol={symbol} spec={spec} size={24} />
                       </span>
                     ) : (
                       <span
@@ -385,11 +417,11 @@ export const SpecificationPanel: React.FC<SpecificationPanelProps> = ({
                           transform: `${symbol.flip === 'h' || symbol.flip === 'hv' ? 'scaleX(-1)' : ''} ${symbol.flip === 'v' || symbol.flip === 'hv' ? 'scaleY(-1)' : ''} rotate(${symbol.rotate || 0}deg)`,
                         }}
                       >
-                        {symbol.char}
+                        {getSymbolDisplayChar(symbol.v)}
                       </span>
                     )}
                     <span className="font-mono text-sm text-foreground">
-                      "{symbol.refId ? `#${symbol.refId}` : symbol.refName ? `@${symbol.refName}` : symbol.refClass ? `.${symbol.refClass}` : symbol.char}"
+                      "{symbol.refId ? `#${symbol.refId}` : symbol.refName ? `@${symbol.refName}` : symbol.refClass ? `.${symbol.refClass}` : getSymbolDisplayChar(symbol.v)}"
                     </span>
 
                     <div className="flex items-center gap-1 ml-auto">
