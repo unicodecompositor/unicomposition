@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UniCompSpec, SymbolSpec, getRect, stringifySpec } from '@/lib/unicomp-parser';
+import { UniCompSpec, SymbolSpec, stringifySpec } from '@/lib/unicomp-parser';
 import { indexToCoords } from '@/lib/grid-geometry';
 import { resizeGrid } from '@/lib/grid-resize';
 
@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 import { Label } from '@/components/ui/label';
-import { renderSpecToOffscreen } from '@/lib/render-utils';
+import { lookupRegistry } from '@/lib/render-utils';
 
 function getSymbolDisplayChar(v: string | undefined): string {
   const raw = v ?? '';
@@ -17,8 +17,8 @@ function getSymbolDisplayChar(v: string | undefined): string {
   return raw;
 }
 
-/** Tiny inline canvas that renders a referenced #id symbol */
-const NestedSymbolPreview: React.FC<{ symbol: SymbolSpec; spec: UniCompSpec; size?: number }> = ({ symbol, spec, size = 24 }) => {
+/** Tiny inline canvas that shows the pre-rendered canvas for a #id reference */
+const NestedSymbolPreview: React.FC<{ symbol: SymbolSpec; size?: number }> = ({ symbol, size = 24 }) => {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -29,8 +29,8 @@ const NestedSymbolPreview: React.FC<{ symbol: SymbolSpec; spec: UniCompSpec; siz
     const refId = symbol.refId;
     if (!refId) return;
 
-    const sourceSym = spec.symbols.find(s => s.id === refId);
-    if (!sourceSym) return;
+    const offscreen = lookupRegistry(refId);
+    if (!offscreen) return;
 
     const dpr = window.devicePixelRatio || 1;
     canvas.width = size * dpr;
@@ -39,38 +39,8 @@ const NestedSymbolPreview: React.FC<{ symbol: SymbolSpec; spec: UniCompSpec; siz
     canvas.style.height = `${size}px`;
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, size, size);
-
-    const idRect = getRect(sourceSym.start, sourceSym.end, spec.gridWidth);
-    const idW = idRect.x2 - idRect.x1 + 1;
-    const idH = idRect.y2 - idRect.y1 + 1;
-    const isoSym = {
-      ...sourceSym,
-      start: 0,
-      end: (idH - 1) * idW + (idW - 1),
-      background: undefined,
-      backgroundOpacity: undefined,
-      borderRadius: undefined,
-      layerBorderWidth: undefined,
-      layerBorderColor: undefined,
-      layerBorderOpacity: undefined,
-    };
-    const isoSpec: UniCompSpec = {
-      ...spec,
-      gridWidth: idW,
-      gridHeight: idH,
-      symbols: [isoSym as typeof sourceSym],
-      background: undefined,
-      backgroundOpacity: undefined,
-      borderRadius: undefined,
-      strokeColor: undefined,
-      strokeWidth: undefined,
-      strokeOpacity: undefined,
-      opacity: undefined,
-    };
-
-    const offscreen = renderSpecToOffscreen(isoSpec, 64, 'hsl(210, 20%, 92%)');
     ctx.drawImage(offscreen, 0, 0, size * dpr, size * dpr);
-  }, [symbol, spec, size]);
+  }, [symbol, size]);
 
   return <canvas ref={ref} className="rounded" />;
 };
@@ -406,7 +376,7 @@ export const SpecificationPanel: React.FC<SpecificationPanelProps> = ({
                           backgroundColor: color.replace(')', ', 0.2)').replace('hsl', 'hsla'),
                         }}
                       >
-                        <NestedSymbolPreview symbol={symbol} spec={spec} size={24} />
+                        <NestedSymbolPreview symbol={symbol} size={24} />
                       </span>
                     ) : (
                       <span

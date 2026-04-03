@@ -448,45 +448,6 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
       }
     }
 
-    // Build id map for resolving #id references within this spec
-    const idMap = new Map<string, OffscreenCanvas>();
-    if (spec?.symbols) {
-      spec.symbols.forEach((sym, i) => {
-        if (!sym.id) return;
-        const idRect = getRect(sym.start, sym.end, gridWidth);
-        const idW = idRect.x2 - idRect.x1 + 1;
-        const idH = idRect.y2 - idRect.y1 + 1;
-        const isoIdSym = {
-          ...sym,
-          start: 0,
-          end: (idH - 1) * idW + (idW - 1),
-          background: undefined,
-          backgroundOpacity: undefined,
-          borderRadius: undefined,
-          layerBorderWidth: undefined,
-          layerBorderColor: undefined,
-          layerBorderOpacity: undefined,
-          strokeWidth: undefined,
-          strokeColor: undefined,
-          strokeOpacity: undefined,
-        };
-        const isoIdSpec: UniCompSpec = {
-          ...spec,
-          gridWidth: idW,
-          gridHeight: idH,
-          symbols: [isoIdSym as typeof sym],
-          background: undefined,
-          backgroundOpacity: undefined,
-          borderRadius: undefined,
-          strokeWidth: undefined,
-          strokeColor: undefined,
-          strokeOpacity: undefined,
-          opacity: undefined,
-        };
-        idMap.set(sym.id, renderSpecToOffscreen(isoIdSpec, cellSize, COLORS[i % COLORS.length], 0, idMap));
-      });
-    }
-
     if (spec?.symbols) {
       spec.symbols.forEach((symbol, idx) => {
         if (hiddenSet.includes(idx)) return;
@@ -554,7 +515,7 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
         };
 
         const layerColor = COLORS[idx % COLORS.length];
-        const offscreen = renderSpecToOffscreen(symSpec, cellSize, layerColor, 0, idMap);
+        const offscreen = renderSpecToOffscreen(symSpec, cellSize, layerColor);
 
         const hasStroke = symbol.strokeWidth && symbol.strokeWidth > 0;
         const strokePx = hasStroke ? Math.max(1, Math.round(symbol.strokeWidth! * cellSize)) : 0;

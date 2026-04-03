@@ -1,8 +1,24 @@
 import { UniCompSpec, SymbolSpec, getRect } from '@/lib/unicomp-parser';
 import { DEFAULT_GPU_EXPAND_FACTOR, SuperTransformer } from '@/lib/SuperTransformer';
 
-function getRegistry() {
-  return { resolve: (_sym: unknown) => null };
+// Module-level registry: grid id → pre-rendered OffscreenCanvas
+const _registry = new Map<string, OffscreenCanvas>();
+
+export function registerGridSpec(
+  id: string,
+  spec: UniCompSpec,
+  pixelsPerCell: number = 64,
+  defaultColor: string = 'hsl(210, 20%, 92%)',
+): void {
+  _registry.set(id, renderSpecToOffscreen(spec, pixelsPerCell, defaultColor));
+}
+
+export function clearRegistry(): void {
+  _registry.clear();
+}
+
+export function lookupRegistry(id: string): OffscreenCanvas | undefined {
+  return _registry.get(id);
 }
 
 let _sharedGpu: SuperTransformer | null = null;
@@ -572,7 +588,6 @@ export function renderSpecToOffscreen(
   pixelsPerCell: number = 64,
   defaultColor: string = 'hsl(210, 20%, 92%)',
   depth: number = 0,
-  idMap?: Map<string, OffscreenCanvas>,
 ): OffscreenCanvas {
   if (depth > 20) {
     return new OffscreenCanvas(1, 1);
@@ -583,42 +598,6 @@ export function renderSpecToOffscreen(
   const canvas = new OffscreenCanvas(w, h);
   const ctx = canvas.getContext('2d');
   if (!ctx) return canvas;
-
-  // Build id map for #id reference resolution (only at depth 0, if not provided)
-  const resolvedIdMap: Map<string, OffscreenCanvas> = idMap ?? new Map();
-  if (!idMap && depth === 0) {
-    spec.symbols.forEach((sym) => {
-      if (!sym.id) return;
-      const idRect = getRect(sym.start, sym.end, spec.gridWidth);
-      const idW = idRect.x2 - idRect.x1 + 1;
-      const idH = idRect.y2 - idRect.y1 + 1;
-      const isoIdSym = {
-        ...sym,
-        start: 0,
-        end: (idH - 1) * idW + (idW - 1),
-        background: undefined,
-        backgroundOpacity: undefined,
-        borderRadius: undefined,
-        layerBorderWidth: undefined,
-        layerBorderColor: undefined,
-        layerBorderOpacity: undefined,
-      };
-      const isoIdSpec: UniCompSpec = {
-        ...spec,
-        gridWidth: idW,
-        gridHeight: idH,
-        symbols: [isoIdSym as typeof sym],
-        background: undefined,
-        backgroundOpacity: undefined,
-        borderRadius: undefined,
-        strokeColor: undefined,
-        strokeWidth: undefined,
-        strokeOpacity: undefined,
-        opacity: undefined,
-      };
-      resolvedIdMap.set(sym.id, renderSpecToOffscreen(isoIdSpec, pixelsPerCell, defaultColor, depth + 1, resolvedIdMap));
-    });
-  }
 
   // --- Grid-level background ---
   if (spec.background) {
@@ -693,16 +672,16 @@ export function renderSpecToOffscreen(
       layerBorderOpacity: undefined,
     };
 
-    // Resolve #id reference via idMap
+    // Resolve #id reference via module-level registry
     let baseCanvas: OffscreenCanvas | undefined;
     if (cleanSym.refId) {
-      baseCanvas = resolvedIdMap.get(cleanSym.refId);
+      baseCanvas = _registry.get(cleanSym.refId);
+      if (!baseCanvas) return; // referenced id not registered — skip
     }
     if (!baseCanvas) {
       if (hasSt || hasSp || hasW) {
         const symW = rect.x2 - rect.x1 + 1;
         const symH = rect.y2 - rect.y1 + 1;
-        // isoSym: only glyph props (no st/sp here — GPU applies them after)
         const isoSym = {
           ...cleanSym,
           st: undefined, sp: undefined, w: undefined,
@@ -716,13 +695,11 @@ export function renderSpecToOffscreen(
           strokeColor: undefined, strokeWidth: undefined, strokeOpacity: undefined,
           opacity: undefined, raw: spec.raw,
         };
-        baseCanvas = renderSpecToOffscreen(isoSpec, pixelsPerCell, defaultColor, depth + 1, resolvedIdMap);
+        baseCanvas = renderSpecToOffscreen(isoSpec, pixelsPerCell, defaultColor, depth + 1);
       } else if (!hasSymbolStroke) {
-        // No deformation, no symbol stroke — draw glyph directly (layer bg/border handled separately)
         drawSymbolGlyph(ctx, cleanSym, x1, y1, sw, sh, defaultColor);
         return;
       } else {
-        // Has symbol stroke but no deformation — rasterize glyph only (no layer bg) for stroke pass
         const symW = rect.x2 - rect.x1 + 1;
         const symH = rect.y2 - rect.y1 + 1;
         const isoSym = {
@@ -739,7 +716,7 @@ export function renderSpecToOffscreen(
           strokeColor: undefined, strokeWidth: undefined, strokeOpacity: undefined,
           opacity: undefined, raw: spec.raw,
         };
-        baseCanvas = renderSpecToOffscreen(isoSpec, pixelsPerCell, defaultColor, depth + 1, resolvedIdMap);
+        baseCanvas = renderSpecToOffscreen(isoSpec, pixelsPerCell, defaultColor, depth + 1);
       }
     }
     if (!baseCanvas) return;

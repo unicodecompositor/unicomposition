@@ -8,6 +8,7 @@ import { FormatReference } from '@/components/FormatReference';
 import { GridVisualizationPanel } from '@/components/GridVisualizationPanel';
 import { BlockSelector } from '@/components/BlockSelector';
 import { parseUniComp, parseMultiLine, getRect, stringifySpec } from '@/lib/unicomp-parser';
+import { clearRegistry, registerGridSpec } from '@/lib/render-utils';
 import { useLocaleProvider } from '@/hooks/useLocale';
 import { useHistory } from '@/hooks/useHistory';
 import { Layers, PanelRightClose, PanelRightOpen, LayoutGrid, Grid, Hash, Eye, Download, Undo2, Redo2, Copy, ClipboardPaste, Save, FolderOpen } from 'lucide-react';
@@ -91,6 +92,25 @@ const IndexContent: React.FC = () => {
     const result = parseUniComp(deferredCode);
     return result.success ? result.spec : null;
   }, [deferredCode, selectedBlockIndex]);
+
+  // Register all grid specs with id= into the module-level registry for #id reference resolution
+  useEffect(() => {
+    clearRegistry();
+    const hasMultipleLines = deferredCode.includes('\n');
+    if (hasMultipleLines) {
+      const multiResult = parseMultiLine(deferredCode);
+      multiResult.blocks.forEach(block => {
+        if (block.result.success && block.result.spec.grid.id) {
+          registerGridSpec(block.result.spec.grid.id, block.result.spec);
+        }
+      });
+    } else {
+      const result = parseUniComp(deferredCode);
+      if (result.success && result.spec.grid.id) {
+        registerGridSpec(result.spec.grid.id, result.spec);
+      }
+    }
+  }, [deferredCode]);
 
   const handleUpdateCode = useCallback((newRuleCode: string, isFinal: boolean) => {
     const hasMultipleLines = code.includes('\n');
