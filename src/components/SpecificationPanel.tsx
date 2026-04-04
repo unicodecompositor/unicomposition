@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UniCompSpec, SymbolSpec, stringifySpec } from '@/lib/unicomp-parser';
+import { UniCompSpec, SymbolSpec, getRect, stringifySpec } from '@/lib/unicomp-parser';
 import { indexToCoords } from '@/lib/grid-geometry';
 import { resizeGrid } from '@/lib/grid-resize';
 

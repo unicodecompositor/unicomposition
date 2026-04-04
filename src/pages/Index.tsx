@@ -83,18 +83,6 @@ const IndexContent: React.FC = () => {
   }, [code, selectedBlockIndex]);
 
   const deferredSpec = useMemo(() => {
-    const hasMultipleLines = deferredCode.includes('\n');
-    if (hasMultipleLines) {
-      const multiResult = parseMultiLine(deferredCode);
-      const selectedBlock = multiResult.blocks[selectedBlockIndex] || multiResult.blocks[0];
-      return selectedBlock?.result?.success ? selectedBlock.result.spec : null;
-    }
-    const result = parseUniComp(deferredCode);
-    return result.success ? result.spec : null;
-  }, [deferredCode, selectedBlockIndex]);
-
-  // Register all grid specs with id= into the module-level registry for #id reference resolution
-  useEffect(() => {
     clearRegistry();
     const hasMultipleLines = deferredCode.includes('\n');
     if (hasMultipleLines) {
@@ -104,13 +92,15 @@ const IndexContent: React.FC = () => {
           registerGridSpec(block.result.spec.grid.id, block.result.spec);
         }
       });
-    } else {
-      const result = parseUniComp(deferredCode);
-      if (result.success && result.spec.grid.id) {
-        registerGridSpec(result.spec.grid.id, result.spec);
-      }
+      const selectedBlock = multiResult.blocks[selectedBlockIndex] || multiResult.blocks[0];
+      return selectedBlock?.result?.success ? selectedBlock.result.spec : null;
     }
-  }, [deferredCode]);
+    const result = parseUniComp(deferredCode);
+    if (result.success && result.spec.grid.id) {
+      registerGridSpec(result.spec.grid.id, result.spec);
+    }
+    return result.success ? result.spec : null;
+  }, [deferredCode, selectedBlockIndex]);
 
   const handleUpdateCode = useCallback((newRuleCode: string, isFinal: boolean) => {
     const hasMultipleLines = code.includes('\n');
