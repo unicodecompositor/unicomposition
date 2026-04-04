@@ -1,12 +1,8 @@
 import { UniCompSpec, SymbolSpec, getRect } from '@/lib/unicomp-parser';
 import { DEFAULT_GPU_EXPAND_FACTOR, SuperTransformer } from '@/lib/SuperTransformer';
 
-// Module-level registry: grid id → UniCompSpec (for context-aware color re-rendering)
-const _specRegistry = new Map<string, UniCompSpec>();
-// Thumbnail cache: grid id → pre-rendered OffscreenCanvas with default color (for SpecificationPanel)
-const _thumbRegistry = new Map<string, OffscreenCanvas>();
-// Render cache: `id:color:ppc` → OffscreenCanvas
-const _renderCache = new Map<string, OffscreenCanvas>();
+// Module-level registry: grid id → pre-rendered OffscreenCanvas
+const _registry = new Map<string, OffscreenCanvas>();
 
 export function registerGridSpec(
   id: string,
@@ -14,19 +10,15 @@ export function registerGridSpec(
   pixelsPerCell: number = 64,
   defaultColor: string = 'hsl(210, 20%, 92%)',
 ): void {
-  _specRegistry.set(id, spec);
-  _renderCache.clear();
-  _thumbRegistry.set(id, renderSpecToOffscreen(spec, pixelsPerCell, defaultColor));
+  _registry.set(id, renderSpecToOffscreen(spec, pixelsPerCell, defaultColor));
 }
 
 export function clearRegistry(): void {
-  _specRegistry.clear();
-  _thumbRegistry.clear();
-  _renderCache.clear();
+  _registry.clear();
 }
 
 export function lookupRegistry(id: string): OffscreenCanvas | undefined {
-  return _thumbRegistry.get(id);
+  return _registry.get(id);
 }
 
 let _sharedGpu: SuperTransformer | null = null;
@@ -681,19 +673,10 @@ export function renderSpecToOffscreen(
     };
 
     // Resolve #id reference via module-level registry
-    // Re-render with the effective color: explicit c= on the symbol, or current defaultColor
     let baseCanvas: OffscreenCanvas | undefined;
     if (cleanSym.refId) {
-      const refSpec = _specRegistry.get(cleanSym.refId);
-      if (!refSpec) return; // referenced id not registered — skip
-      const effectiveColor = getSymbolColor(cleanSym) ?? defaultColor;
-      const cacheKey = `${cleanSym.refId}:${effectiveColor}:${pixelsPerCell}`;
-      let cached = _renderCache.get(cacheKey);
-      if (!cached) {
-        cached = renderSpecToOffscreen(refSpec, pixelsPerCell, effectiveColor, depth + 1);
-        _renderCache.set(cacheKey, cached);
-      }
-      baseCanvas = cached;
+      baseCanvas = _registry.get(cleanSym.refId);
+      if (!baseCanvas) return; // referenced id not registered — skip
     }
     if (!baseCanvas) {
       if (hasSt || hasSp || hasW) {

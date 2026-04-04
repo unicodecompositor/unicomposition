@@ -17,8 +17,8 @@ function getSymbolDisplayChar(v: string | undefined): string {
   return raw;
 }
 
-/** Tiny inline canvas that shows the pre-rendered canvas for a #id reference */
-const NestedSymbolPreview: React.FC<{ symbol: SymbolSpec; size?: number }> = ({ symbol, size = 24 }) => {
+/** Tiny inline canvas that shows the pre-rendered canvas for a #id reference, tinted with the area color */
+const NestedSymbolPreview: React.FC<{ symbol: SymbolSpec; size?: number; color?: string }> = ({ symbol, size = 24, color }) => {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -39,8 +39,18 @@ const NestedSymbolPreview: React.FC<{ symbol: SymbolSpec; size?: number }> = ({ 
     canvas.style.height = `${size}px`;
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, size, size);
-    ctx.drawImage(offscreen, 0, 0, size * dpr, size * dpr);
-  }, [symbol, size]);
+
+    // Draw the pre-rendered thumbnail
+    ctx.drawImage(offscreen, 0, 0, size, size);
+
+    // If an area color is provided, tint all visible pixels with it
+    if (color) {
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, size, size);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }, [symbol, size, color]);
 
   return <canvas ref={ref} className="rounded" />;
 };
@@ -376,7 +386,7 @@ export const SpecificationPanel: React.FC<SpecificationPanelProps> = ({
                           backgroundColor: color.replace(')', ', 0.2)').replace('hsl', 'hsla'),
                         }}
                       >
-                        <NestedSymbolPreview symbol={symbol} size={24} />
+                        <NestedSymbolPreview symbol={symbol} size={24} color={color} />
                       </span>
                     ) : (
                       <span
